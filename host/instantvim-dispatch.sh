@@ -8,6 +8,13 @@
 # each nvim invocation is one instantvim edit session.
 set -u
 
+# Ghostty spawns this via a login shell with --noprofile --norc, so none of
+# the usual shell startup files run and PATH stays at the bare macOS
+# default (/usr/bin:/bin:/usr/sbin:/sbin plus Ghostty's own bundle dir) --
+# confirmed empirically: neither `nvim` nor `hs` resolved without this,
+# so nvim silently never launched even though the FIFO round-trip worked.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 FIFO="${INSTANTVIM_FIFO:-/tmp/instantvim.fifo}"
 [ -p "$FIFO" ] || mkfifo "$FIFO"
 
