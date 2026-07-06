@@ -1,10 +1,9 @@
 --- === instantvim ===
 ---
 --- Edit any focused text field in any app using a real, fully-configured
---- Neovim running in a Ghostty quick terminal, then flow the result back
---- into the original field. See the repo README and handover doc for the
---- full design (three-tier AX capability model, FIFO-dispatched quick
---- terminal host).
+--- Neovim running in Ghostty, then flow the result back into the original
+--- field. See the repo README and handover doc for the full design
+--- (three-tier AX capability model, host launch modes).
 
 local obj = {}
 obj.__index = obj
@@ -47,34 +46,26 @@ obj.config = {
   tierOverrideByBundleID = {},
 
   -- How the nvim host is launched:
-  --   "qt"        - dedicated background Ghostty quick terminal + FIFO
-  --                 dispatcher (handover §4.3). The real target.
   --   "window"    - `open -na Ghostty --args -e nvim <path>`, a fresh
-  --                 throwaway instance per invocation. Simple, always
-  --                 works, but instances accumulate. Good for bring-up.
-  --   "keystroke" - toggle the quick terminal, then type `nvim <path>`
-  --                 into whatever shell is focused. Racy; last resort.
-  hostMode = "qt",
-
-  -- "qt" mode.
-  fifoPath = "/tmp/instantvim.fifo",
-  -- Keystroke the *dedicated* background Ghostty instance's own config
-  -- binds to `toggle_quick_terminal` (see host/quick-terminal.config).
-  -- Deliberately not the user's personal quick-terminal keybind: macOS
-  -- Ghostty has no CLI/IPC way to invoke the action directly (constraint
-  -- #6), so Hammerspoon has to simulate a keystroke, and it must be one
-  -- that's wired up only on the dedicated instance so it never fires the
-  -- user's own everyday quick terminal.
-  qtToggleKeystroke = { {}, "f19" },
+  --                 throwaway instance per invocation. The only supported
+  --                 mode: a prior "qt" mode ran nvim inside a dedicated
+  --                 background Ghostty instance's quick terminal, but
+  --                 macOS treats Ghostty.app as a single-instance bundle
+  --                 for Dock/Spotlight/`open` activation, so opening
+  --                 Ghostty normally kept hijacking that hidden instance
+  --                 instead of launching an independent one (confirmed
+  --                 the hard way: it left orphaned nvim/dispatcher
+  --                 processes piling up and ate the user's everyday
+  --                 terminal). "window" instances do accumulate over
+  --                 invocations, but each one is fully independent.
+  --   "keystroke" - type `nvim <path>` into whatever shell is currently
+  --                 focused. Racy (depends on a shell already being
+  --                 focused and idle); last resort.
+  hostMode = "window",
 
   -- "window"/"keystroke" mode.
   ghosttyAppPath = "/Applications/Ghostty.app",
   nvimPath = "nvim",
-
-  -- launchd label for the dedicated Ghostty instance (see
-  -- launchd/com.instantvim.qt.plist), used by the menu bar's "Restart
-  -- Quick Terminal Host" action.
-  launchdLabel = "com.instantvim.qt",
 }
 
 -- Active edit session, or nil. Only one at a time (handover §9: enforce a
@@ -141,22 +132,12 @@ local function readFile(path)
   return txt
 end
 
---- Simulate the dedicated Ghostty instance's own quick-terminal toggle.
---- No-op outside "qt" hostMode, where there is no persistent host to show
---- or hide.
-function obj:toggleQuickTerminal()
-  if self.config.hostMode ~= "qt" then return end
-  local mods, key = self.config.qtToggleKeystroke[1], self.config.qtToggleKeystroke[2]
-  hs.eventtap.keyStroke(mods, key)
-end
-
--- Fire-and-forget subprocesses (FIFO writes, `open`). hs.task objects with
--- no live Lua reference can be garbage-collected before their process
--- finishes, silently dropping the call (confirmed empirically: a bare
--- `hs.task.new(...):start()` with no retained reference reliably lost the
--- FIFO write). Keeping a reference here until the completion callback
--- fires avoids that -- same fix editWithEmacs.spoon uses for emacsclient
--- calls.
+-- Fire-and-forget subprocesses (`open`, etc). hs.task objects with no live
+-- Lua reference can be garbage-collected before their process finishes,
+-- silently dropping the call (confirmed empirically: a bare
+-- `hs.task.new(...):start()` with no retained reference reliably lost a
+-- launch). Keeping a reference here until the completion callback fires
+-- avoids that -- same fix editWithEmacs.spoon uses for emacsclient calls.
 obj._pendingTasks = {}
 
 function obj:runTask(launchPath, args)
@@ -168,48 +149,18 @@ function obj:runTask(launchPath, args)
   task:start()
 end
 
---- Write `path` into the FIFO the dispatcher script is blocked reading.
---- Done via hs.task (async) rather than Lua's io.open: a bare io.open for
---- writing on a FIFO blocks until a reader is attached, and doing that
---- synchronously would freeze all of Hammerspoon if the dispatcher loop
---- is ever between iterations when we write.
-function obj:pushToFifo(fifoPath, path)
-  self:runTask("/bin/sh", { "-c", 'printf \'%s\\n\' "$1" > "$2"', "sh", path, fifoPath })
-end
-
 function obj:launchHost(path)
   local mode = self.config.hostMode
-  if mode == "qt" then
-    self:pushToFifo(self.config.fifoPath, path)
-    self:toggleQuickTerminal()
-  elseif mode == "window" then
+  if mode == "window" then
     self:runTask("/usr/bin/open",
       { "-na", self.config.ghosttyAppPath, "--args", "-e", self.config.nvimPath, path })
   elseif mode == "keystroke" then
-    self:toggleQuickTerminal()
     hs.timer.doAfter(0.3, function()
       hs.eventtap.keyStrokes(self.config.nvimPath .. " " .. path .. "\n")
     end)
   else
     self:notify("unknown hostMode '" .. tostring(mode) .. "'", true)
   end
-end
-
---- Hide the host after a session ends. Only meaningful in "qt" mode.
-function obj:hideHost()
-  self:toggleQuickTerminal()
-end
-
---- Restart the dedicated background Ghostty instance (menu bar action, for
---- when the FIFO dispatcher gets stuck). No-op outside "qt" hostMode.
-function obj:restartQuickTerminalHost()
-  if self.config.hostMode ~= "qt" then
-    self:notify("not running in 'qt' hostMode, nothing to restart")
-    return
-  end
-  local uid = hs.execute("id -u"):gsub("%s+$", "")
-  self:runTask("/bin/launchctl", { "kickstart", "-k", "gui/" .. uid .. "/" .. self.config.launchdLabel })
-  self:notify("restarted quick terminal host")
 end
 
 --- Hotkey handler: capture the focused field, classify its tier, stash
@@ -287,10 +238,9 @@ function obj:writeBack()
   end
 end
 
---- End of session. Called by the FIFO dispatcher once nvim exits, and
---- (redundantly, as a safety net) from nvim's own VimLeave. Idempotent:
---- the session is cleared on first entry, so a racing second call is a
---- no-op.
+--- End of session. Called from nvim's own VimLeave once nvim exits.
+--- Idempotent: the session is cleared on first entry, so a racing second
+--- call is a no-op.
 function obj:onClose()
   local s = self.session
   if not s then return end
@@ -317,7 +267,6 @@ function obj:onClose()
     end
   end
 
-  self:hideHost()
   os.remove(s.path)
   self:setStatus("idle")
 end
@@ -346,9 +295,8 @@ function obj:menuItems()
     { title = "-" },
   }
 
-  local hostModes = { "qt", "window", "keystroke" }
+  local hostModes = { "window", "keystroke" }
   local hostModeLabels = {
-    qt = "Quick Terminal (qt)",
     window = "Throwaway Window",
     keystroke = "Keystroke (fallback)",
   }
@@ -361,7 +309,6 @@ function obj:menuItems()
     })
   end
   table.insert(items, { title = "Host Mode", menu = hostModeItems })
-  table.insert(items, { title = "Restart Quick Terminal Host", fn = function() self:restartQuickTerminalHost() end })
   table.insert(items, { title = "-" })
   table.insert(items, { title = "Reload Config", fn = function() hs.reload() end })
 

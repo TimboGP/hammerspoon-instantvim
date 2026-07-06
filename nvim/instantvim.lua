@@ -30,13 +30,12 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 -- while editing). A buffer-local VimLeave autocmd would silently miss
 -- that case.
 --
--- This is a redundant safety net, not the primary path: the FIFO
--- dispatcher (handover §4.3) already calls onClose() itself after nvim
--- exits in the default "qt" host mode. It's the *primary* path for the
--- "window"/"keystroke" fallback modes, which have no dispatcher wrapping
--- nvim at all. onClose() is idempotent, so firing it twice is harmless.
--- `detach = true` because nvim is exiting right after this callback runs
--- and would otherwise take the job down with it before `hs` finishes.
+-- This is the primary path for onClose(): both host modes ("window" and
+-- "keystroke") just launch nvim directly, with nothing else watching for
+-- it to exit. onClose() is idempotent, so firing it more than once is
+-- harmless. `detach = true` because nvim is exiting right after this
+-- callback runs and would otherwise take the job down with it before `hs`
+-- finishes.
 vim.api.nvim_create_autocmd("VimLeave", {
   callback = function() callHammerspoon("onClose", { detach = true }) end,
 })
