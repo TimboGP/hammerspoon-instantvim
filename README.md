@@ -124,6 +124,14 @@ your login shell before launching to work around this; if it still fails,
 set `nvimPath` to an absolute path yourself (e.g.
 `spoon.instantvim.config.nvimPath = "/opt/homebrew/bin/nvim"`).
 
+**Saving in nvim errors with `'hs' is not executable`, or the field never
+live-updates.** Same root cause as above, one level down: nvim's own
+`jobstart({"hs", ...})` call (in `nvim/instantvim.lua`) inherits the same
+Homebrew-less `$PATH`, so it can't find `hs` either. `nvim/instantvim.lua`
+routes that call through `$SHELL -lc` to pick up your shell profile's PATH;
+if `hs` still isn't found, make sure it's actually on your login shell's
+PATH (`command -v hs` in a fresh terminal).
+
 **A session gets stuck ("edit already in progress") after a launch
 failure like the one above.** The lock is only released when nvim's
 `VimLeave` fires `onClose()` — if the host never launched, that never
