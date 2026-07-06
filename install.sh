@@ -15,24 +15,25 @@ echo "== instantvim install =="
 echo "repo: $REPO_DIR"
 
 # --- 1. Spoon symlink -------------------------------------------------
+# The repo root doubles as the .spoon directory (init.lua lives here
+# alongside host/, nvim/, launchd/), matching how Hammerspoon Spoon repos
+# are conventionally structured.
 mkdir -p "$HAMMERSPOON_DIR/Spoons"
-ln -sfn "$REPO_DIR/Spoons/instantvim.spoon" "$HAMMERSPOON_DIR/Spoons/instantvim.spoon"
-echo "[ok] Spoons/instantvim.spoon symlinked into $HAMMERSPOON_DIR/Spoons"
+ln -sfn "$REPO_DIR" "$HAMMERSPOON_DIR/Spoons/instantvim.spoon"
+echo "[ok] repo symlinked as $HAMMERSPOON_DIR/Spoons/instantvim.spoon"
 
 # --- 2. hs CLI ----------------------------------------------------------
-if ! command -v hs >/dev/null 2>&1; then
+# Checked via PATH, not hs.ipc.cliStatus() -- that only looks for the CLI at
+# cliInstall()'s default location (/usr/local/bin/hs), which reports a false
+# negative on Apple Silicon + Homebrew setups where `hs` lives on PATH via
+# /opt/homebrew/bin/hs instead. instantvim.spoon's own :start() does the
+# same PATH-based check.
+if command -v hs >/dev/null 2>&1; then
+  echo "[ok] 'hs' CLI found on PATH ($(command -v hs))"
+else
   echo "[!!] 'hs' CLI not found on PATH."
   echo "     Open Hammerspoon and run in its console: hs.ipc.cliInstall()"
   echo "     Then re-run this script."
-else
-  if hs -c "return hs.ipc.cliStatus()" 2>/dev/null | grep -q true; then
-    echo "[ok] hs CLI is installed and Hammerspoon's IPC server is up"
-  else
-    echo "[!!] 'hs' binary found but Hammerspoon's IPC server did not respond."
-    echo "     Make sure Hammerspoon is running, then run in its console:"
-    echo "       hs.ipc.cliInstall()"
-    echo "     instantvim.spoon also checks this itself on :start()."
-  fi
 fi
 
 # --- 3. FIFO -------------------------------------------------------------

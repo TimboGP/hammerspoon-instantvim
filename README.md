@@ -62,11 +62,21 @@ those are your dotfiles:
    })
    ```
 
+## Menu bar
+
+`spoon.instantvim:start()` adds a "✎ idle" menu bar item (title tracks live
+session state, e.g. "✎ editing (A)"). Its menu:
+
+- **Edit Focused Field** — same action as the hotkey.
+- **Host Mode** — switch `qt`/`window`/`keystroke` live.
+- **Restart Quick Terminal Host** — `launchctl kickstart`s the dedicated
+  Ghostty instance, for when the FIFO dispatcher gets stuck.
+- **Reload Config** — `hs.reload()`.
+
 ## Configuration
 
 All configuration lives in `spoon.instantvim.config` (see
-[`Spoons/instantvim.spoon/init.lua`](Spoons/instantvim.spoon/init.lua) for the
-full, documented table). Notable keys:
+[`init.lua`](init.lua) for the full, documented table). Notable keys:
 
 - `hotkey` — the trigger, default `hyper+e`.
 - `hostMode` — `"qt"` (dedicated quick terminal, the default), `"window"`
@@ -81,11 +91,15 @@ full, documented table). Notable keys:
 
 ## Repo layout
 
+The repo root doubles as the `.spoon` directory (same convention as
+`editWithEmacs.spoon` and `WindowMgmt.spoon`), so it can be symlinked or
+`git submodule add`-ed straight into `~/.hammerspoon/Spoons/instantvim.spoon`.
+
 ```
-Spoons/instantvim.spoon/  hotkey, AX capture/probe, tier engine, write-back
-host/                     FIFO dispatcher + dedicated Ghostty instance config
-nvim/                     BufWritePost / VimLeave wiring
-launchd/                  background agent for the dedicated Ghostty instance
+init.lua, capture.lua, menubar.lua   hotkey, AX capture/probe, tier engine, menu bar
+host/                                 FIFO dispatcher + dedicated Ghostty instance config
+nvim/                                 BufWritePost / VimLeave wiring
+launchd/                              background agent for the dedicated Ghostty instance
 install.sh
 ```
 
