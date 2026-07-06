@@ -90,8 +90,17 @@ end
 -- with Homebrew, `hs` commonly lives on PATH via /opt/homebrew/bin/hs
 -- instead, which cliStatus() reports as "not installed" even though it
 -- works fine. Checking PATH directly avoids that false negative.
+--
+-- Must pass hs.execute's second argument (run via the user's login shell)
+-- -- Hammerspoon.app itself is launched by macOS with the bare default
+-- PATH (/usr/bin:/bin:/usr/sbin:/sbin, no Homebrew dirs), since it's a GUI
+-- app rather than something spawned from a shell that sourced .zprofile.
+-- Without it this reintroduces the exact false negative this function
+-- exists to avoid: `hs` resolves fine for Neovim (Ghostty launches nvim
+-- through a real login shell) even though Hammerspoon's own environment
+-- can't see it.
 local function hsOnPath()
-  local out = hs.execute("command -v hs")
+  local out = hs.execute("command -v hs", true)
   return out ~= nil and out:match("%S") ~= nil
 end
 
