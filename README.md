@@ -73,6 +73,10 @@ Hammerspoon and Neovim configs directly), since those are your dotfiles:
 session state, e.g. "✎ editing (A)"). Its menu:
 
 - **Edit Focused Field** — same action as the hotkey.
+- **Cancel Edit Session** — force-clears a stuck/unwanted session (e.g. the
+  Ghostty window never launched) without writing anything back to the source
+  field. Disabled when there's no active session. Also bindable as a hotkey
+  via `cancelHotkey` (unbound by default).
 - **Host Mode** — switch `window`/`keystroke` live.
 - **Reload Config** — `hs.reload()`.
 
@@ -82,6 +86,8 @@ All configuration lives in `spoon.instantvim.config` (see
 [`init.lua`](init.lua) for the full, documented table). Notable keys:
 
 - `hotkey` — the trigger, default `hyper+e`.
+- `cancelHotkey` — aborts a stuck edit session (see Menu bar above); unbound
+  by default, use the menu item or set this to bind a key.
 - `hostMode` — `"window"` (throwaway `open -na Ghostty` instance per
   invocation, the default), or `"keystroke"` (type `nvim <path>` into
   whatever's focused; racy, last resort).
@@ -108,6 +114,22 @@ install.sh
 appears.** Check that `ghosttyAppPath`/`nvimPath` in `spoon.instantvim.config`
 point at a real Ghostty install and an `nvim` resolvable from `open`'s
 environment.
+
+**Ghostty window opens but errors with `login: nvim: No such file or
+directory`.** On macOS, Ghostty's `-e` runs the host command through
+`/usr/bin/login`, which `exec`s it directly rather than through a shell —
+so it never picks up PATH entries a shell profile adds (e.g. Homebrew's
+`/opt/homebrew/bin`). instantvim resolves `nvimPath` to an absolute path via
+your login shell before launching to work around this; if it still fails,
+set `nvimPath` to an absolute path yourself (e.g.
+`spoon.instantvim.config.nvimPath = "/opt/homebrew/bin/nvim"`).
+
+**A session gets stuck ("edit already in progress") after a launch
+failure like the one above.** The lock is only released when nvim's
+`VimLeave` fires `onClose()` — if the host never launched, that never
+happens. Use **Cancel Edit Session** in the menu bar (or bind
+`cancelHotkey`) to drop the lock and clean up the temp file without
+touching the source field.
 
 ## Credits
 

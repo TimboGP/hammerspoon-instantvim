@@ -9,7 +9,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "instantvim"
-obj.version = "0.1.6"
+obj.version = "0.1.7"
 obj.author = "tboehm"
 obj.license = "MIT"
 obj.homepage = "https://github.com/TimboGP/hammerspoon-instantvim"
@@ -27,6 +27,13 @@ obj.logger = hs.logger.new("instantvim")
 obj.config = {
   -- Hotkey that starts an edit session: { modifiers, key }.
   hotkey = { { "cmd", "alt", "ctrl", "shift" }, "e" }, -- hyper+e
+
+  -- Hotkey that aborts a stuck/unwanted edit session (e.g. the host
+  -- failed to launch and the "edit already in progress" lock never
+  -- clears). nil by default -- unbound unless you opt in, since there's
+  -- no safe universal default that won't collide with something else.
+  -- Also reachable from the menu bar regardless of this setting.
+  cancelHotkey = nil,
 
   -- Where temp buffers are written. Each is deleted when its session ends.
   tempDir = "/tmp",
@@ -111,6 +118,24 @@ local function ensureHsCli()
   return hsOnPath()
 end
 
+-- Resolves config.nvimPath to an absolute path via the user's login shell
+-- PATH. Ghostty's `-e` launches the host command through
+-- `/usr/bin/login -flp <user> <cmd>...`, which execs the command directly
+-- rather than through a shell -- so it never sees PATH entries a shell
+-- profile would add (e.g. Homebrew's /opt/homebrew/bin). A bare "nvim"
+-- resolves fine when typed into an already-running shell (keystroke mode)
+-- but fails under `login` with "nvim: No such file or directory". Same
+-- root cause as hsOnPath() above; resolving to an absolute path here sides
+-- steps login's PATH entirely.
+local function resolveNvimPath(nvimPath)
+  if nvimPath:sub(1, 1) == "/" then return nvimPath end
+  local out = hs.execute("command -v " .. nvimPath, true)
+  if out and out:match("%S") then
+    return (out:gsub("%s+$", ""))
+  end
+  return nvimPath
+end
+
 function obj:setStatus(text)
   self.status = text
   menubar.setStatus(text)
@@ -162,7 +187,7 @@ function obj:launchHost(path)
   local mode = self.config.hostMode
   if mode == "window" then
     self:runTask("/usr/bin/open",
-      { "-na", self.config.ghosttyAppPath, "--args", "-e", self.config.nvimPath, path })
+      { "-na", self.config.ghosttyAppPath, "--args", "-e", resolveNvimPath(self.config.nvimPath), path })
   elseif mode == "keystroke" then
     hs.timer.doAfter(0.3, function()
       hs.eventtap.keyStrokes(self.config.nvimPath .. " " .. path .. "\n")
@@ -280,16 +305,38 @@ function obj:onClose()
   self:setStatus("idle")
 end
 
+--- Aborts a stuck or unwanted session without writing anything back to the
+--- source field. Unlike onClose(), this never touches the clipboard or the
+--- original app -- it just drops the lock and cleans up the temp file, so
+--- it's safe to call when the host (e.g. Ghostty/nvim) never actually
+--- launched and VimLeave will consequently never fire. If the nvim window
+--- did launch, it's left open; closing/quitting it afterwards just hits
+--- onClose()'s "no session" no-op.
+function obj:cancel()
+  local s = self.session
+  if not s then
+    self:notify("no edit in progress")
+    return
+  end
+  self.session = nil
+  os.remove(s.path)
+  self:setStatus("idle")
+  self:notify("edit session cancelled")
+end
+
 function obj:bindHotkeys(mapping)
   local def = {
     edit = function() self:edit() end,
+    cancel = function() self:cancel() end,
   }
   local descriptions = {
     edit = "Edit focused field with Neovim [instantvim]",
+    cancel = "Cancel in-progress edit session [instantvim]",
   }
+  self.hotkeyObjs = self.hotkeyObjs or {}
   for name, spec in pairs(mapping) do
-    if def[name] then
-      self.hotkeyObj = hs.hotkey.bind(spec[1], spec[2], descriptions[name], def[name])
+    if def[name] and spec then
+      self.hotkeyObjs[name] = hs.hotkey.bind(spec[1], spec[2], descriptions[name], def[name])
     end
   end
 end
@@ -301,6 +348,11 @@ function obj:menuItems()
     { title = "instantvim: " .. self.status, disabled = true },
     { title = "-" },
     { title = "Edit Focused Field", fn = function() self:edit() end },
+    {
+      title = "Cancel Edit Session",
+      disabled = self.session == nil,
+      fn = function() self:cancel() end,
+    },
     { title = "-" },
   }
 
@@ -334,7 +386,7 @@ function obj:start()
   if not ensureHsCli() then
     self:notify("'hs' CLI not found on PATH - live write-back from nvim will not work. See README.", true)
   end
-  self:bindHotkeys({ edit = self.config.hotkey })
+  self:bindHotkeys({ edit = self.config.hotkey, cancel = self.config.cancelHotkey })
   menubar.start()
   menubar.setMenu(function() return self:menuItems() end)
   self.logger.i("instantvim started")
@@ -342,9 +394,9 @@ function obj:start()
 end
 
 function obj:stop()
-  if self.hotkeyObj then
-    self.hotkeyObj:delete()
-    self.hotkeyObj = nil
+  for name, hotkeyObj in pairs(self.hotkeyObjs or {}) do
+    hotkeyObj:delete()
+    self.hotkeyObjs[name] = nil
   end
   menubar.stop()
   return self
