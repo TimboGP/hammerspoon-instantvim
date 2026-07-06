@@ -5,7 +5,12 @@
 # Safe to re-run: every step is idempotent.
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# -P resolves symlinks physically. Without it, running this script through
+# the ~/.hammerspoon/Spoons/instantvim.spoon convenience symlink resolves
+# REPO_DIR to that symlink's own path -- and since step 1 below re-creates
+# that exact symlink from REPO_DIR, a plain (logical) `cd`/`pwd` here turns
+# it into a symlink pointing at itself (confirmed the hard way).
+REPO_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 HAMMERSPOON_DIR="$HOME/.hammerspoon"
 INSTALL_DIR="$HOME/.instantvim"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
