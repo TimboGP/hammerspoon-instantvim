@@ -16,7 +16,7 @@
 local buf = vim.api.nvim_get_current_buf()
 
 local function callHammerspoon(fn, opts)
-  vim.fn.jobstart({ "hs", "-c", "spoon.instantvim:" .. fn .. "()" }, opts)
+  vim.fn.jobstart({ "hs", "-c", "spoon.instantvim:" .. fn .. "()" }, opts or {})
 end
 
 vim.api.nvim_create_autocmd("BufWritePost", {
