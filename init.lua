@@ -9,7 +9,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "instantvim"
-obj.version = "0.1.0"
+obj.version = "0.1.5"
 obj.author = "tboehm"
 obj.license = "MIT"
 obj.homepage = "https://github.com/TimboGP/hammerspoon-instantvim"
