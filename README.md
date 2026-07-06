@@ -42,11 +42,20 @@ this platform" on macOS).
 ./install.sh
 ```
 
-This symlinks the Spoon into `~/.hammerspoon/Spoons`, ensures the `hs` CLI is
-installed, creates the FIFO, generates and loads the `launchd` agent for the
-dedicated Ghostty instance. It prints two manual steps it deliberately does
-*not* do for you (editing your Hammerspoon and Neovim configs directly), since
-those are your dotfiles:
+**Required, not optional** — `hostMode = "qt"` (the default) does nothing
+without it. Symlinking the Spoon and calling `spoon.instantvim:start()` is
+enough to get the hotkey, capture, and tier detection working, but with no
+dedicated Ghostty instance running there's nothing listening on the FIFO:
+the hotkey fires, the menu bar tracks "editing (A)", a temp file gets
+written — and no terminal ever appears, silently. That exact symptom means
+`install.sh` hasn't been run (or the launchd agent isn't loaded) — see
+Troubleshooting below.
+
+`install.sh` symlinks the Spoon into `~/.hammerspoon/Spoons`, ensures the
+`hs` CLI is installed, creates the FIFO, generates and loads the `launchd`
+agent for the dedicated Ghostty instance. It's safe to re-run any time. It
+prints two manual steps it deliberately does *not* do for you (editing your
+Hammerspoon and Neovim configs directly), since those are your dotfiles:
 
 1. Add to your Hammerspoon config:
    ```lua
@@ -102,6 +111,36 @@ nvim/                                 BufWritePost / VimLeave wiring
 launchd/                              background agent for the dedicated Ghostty instance
 install.sh
 ```
+
+## Troubleshooting
+
+**Hotkey works, menu bar tracks an active session, but no terminal ever
+appears.** `install.sh` hasn't been run (or its launchd agent didn't load),
+so there's no dedicated Ghostty instance listening for the FIFO write.
+Check, in order:
+
+```sh
+# Is the launchd agent registered and running?
+launchctl print gui/$(id -u)/com.instantvim.qt | grep state
+
+# Is the dedicated instance actually up? (there should be two Ghostty
+# processes: your normal one, plus this one with --config-file=...quick-terminal.config)
+ps aux | grep -i ghostty
+
+# Is the FIFO a real named pipe, not a stray regular file left behind by
+# writing to a path that didn't exist yet?
+file /tmp/instantvim.fifo   # must say "fifo (named pipe)", not "ASCII text"
+```
+
+If any of those look wrong, run `./install.sh` (safe to re-run) and try
+the hotkey again.
+
+**Terminal appears but nvim doesn't launch inside it.** Ghostty spawns the
+dispatcher via a login shell with `--noprofile --norc`, so `PATH` stays at
+the bare macOS default and never picks up Homebrew's `bin` dirs — fixed as
+of the dispatcher script exporting `PATH` itself, but if you're running an
+older checkout, `git pull` the submodule/repo and re-run `install.sh`
+(which restarts the dedicated instance).
 
 ## Credits
 
