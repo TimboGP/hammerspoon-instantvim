@@ -65,7 +65,12 @@ sed "s|__QT_CONFIG_PATH__|$INSTALL_DIR/quick-terminal.config|" \
 echo "[ok] generated $PLIST_PATH"
 
 UID_NUM="$(id -u)"
-launchctl bootout "gui/$UID_NUM/$PLIST_LABEL" >/dev/null 2>&1 || true
+if launchctl print "gui/$UID_NUM/$PLIST_LABEL" >/dev/null 2>&1; then
+  launchctl bootout "gui/$UID_NUM/$PLIST_LABEL"
+  # bootout is asynchronous -- an immediate bootstrap can race it and fail
+  # with "Input/output error" (confirmed the hard way). Give it a moment.
+  sleep 1
+fi
 launchctl bootstrap "gui/$UID_NUM" "$PLIST_PATH"
 echo "[ok] loaded launchd agent $PLIST_LABEL (dedicated Ghostty instance is starting hidden in the background)"
 
