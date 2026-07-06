@@ -66,12 +66,27 @@ function M.probe(elem, callback)
     return
   end
 
-  local ok, value = pcall(function() return elem:attributeValue("AXValue") end)
-  if ok and type(value) == "string" then
-    local settableOk, settable = pcall(function() return elem:isAttributeSettable("AXValue") end)
-    local tier = (settableOk and settable) and "A" or "B"
-    callback({ tier = tier, value = value })
-    return
+  -- WebKit editable regions (e.g. Mail's HTML compose body) report
+  -- AXRole == AXWebArea and lie on both ends of AXValue: it reads back an
+  -- empty string instead of the actual rendered content (confirmed the
+  -- hard way: a prefilled signature never showed up in the captured text),
+  -- and isAttributeSettable(AXValue) reports true even though setting it
+  -- is a silent no-op that never touches the rendered content. Skip the
+  -- AXValue shortcut entirely for this role and always use the
+  -- select-all+copy fallback below, which reads real text and correctly
+  -- downgrades write-back to paste-on-quit instead of a setAttributeValue
+  -- that wouldn't do anything.
+  local roleOk, role = pcall(function() return elem:attributeValue("AXRole") end)
+  local isWebArea = roleOk and role == "AXWebArea"
+
+  if not isWebArea then
+    local ok, value = pcall(function() return elem:attributeValue("AXValue") end)
+    if ok and type(value) == "string" then
+      local settableOk, settable = pcall(function() return elem:isAttributeSettable("AXValue") end)
+      local tier = (settableOk and settable) and "A" or "B"
+      callback({ tier = tier, value = value })
+      return
+    end
   end
 
   -- AXValue unreadable but confirmed non-secure: try the select-all+copy
@@ -93,6 +108,30 @@ function M.probe(elem, callback)
       callback({ tier = "C", reason = "field did not respond to AX or copy" })
     end
   end)
+end
+
+--- Best-effort human-readable label for the field itself (as opposed to the
+--- app/window), e.g. a placeholder or a linked label element ("Subject:",
+--- "Search", "Comment"). Wildly app-dependent -- most fields expose at
+--- least one of these, but none is universal, so this returns nil rather
+--- than a generic role name when nothing usable is found; callers should
+--- just leave it out of their message in that case.
+function M.describeElement(elem)
+  local function attr(target, name)
+    local ok, v = pcall(function() return target:attributeValue(name) end)
+    if ok and type(v) == "string" and v:match("%S") then return v end
+    return nil
+  end
+
+  local label = attr(elem, "AXPlaceholderValue") or attr(elem, "AXTitle") or attr(elem, "AXDescription")
+  if label then return label end
+
+  local ok, titleElem = pcall(function() return elem:attributeValue("AXTitleUIElement") end)
+  if ok and titleElem then
+    return attr(titleElem, "AXValue") or attr(titleElem, "AXTitle")
+  end
+
+  return nil
 end
 
 --- Infer a file extension for the temp buffer so nvim gets useful

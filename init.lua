@@ -9,7 +9,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "instantvim"
-obj.version = "0.1.7"
+obj.version = "0.2.0"
 obj.author = "tboehm"
 obj.license = "MIT"
 obj.homepage = "https://github.com/TimboGP/hammerspoon-instantvim"
@@ -53,24 +53,37 @@ obj.config = {
   tierOverrideByBundleID = {},
 
   -- How the nvim host is launched:
-  --   "window"    - `open -na Ghostty --args -e nvim <path>`, a fresh
-  --                 throwaway instance per invocation. The only supported
-  --                 mode: a prior "qt" mode ran nvim inside a dedicated
-  --                 background Ghostty instance's quick terminal, but
-  --                 macOS treats Ghostty.app as a single-instance bundle
-  --                 for Dock/Spotlight/`open` activation, so opening
-  --                 Ghostty normally kept hijacking that hidden instance
-  --                 instead of launching an independent one (confirmed
-  --                 the hard way: it left orphaned nvim/dispatcher
-  --                 processes piling up and ate the user's everyday
-  --                 terminal). "window" instances do accumulate over
-  --                 invocations, but each one is fully independent.
+  --   "window"    - runs Ghostty's own executable directly (see
+  --                 ghosttyAppPath below), a fresh throwaway instance per
+  --                 invocation. The only supported mode: a prior "qt" mode
+  --                 ran nvim inside a dedicated background Ghostty
+  --                 instance's quick terminal, but macOS treats
+  --                 Ghostty.app as a single-instance bundle for
+  --                 Dock/Spotlight/`open` activation, so opening Ghostty
+  --                 normally kept hijacking that hidden instance instead
+  --                 of launching an independent one (confirmed the hard
+  --                 way: it left orphaned nvim/dispatcher processes piling
+  --                 up and ate the user's everyday terminal). Launching
+  --                 the bundle's executable directly, instead of via
+  --                 `open`, sidesteps LaunchServices' single-instance
+  --                 activation entirely -- as a bonus this also avoids a
+  --                 macOS prompt ("Allow Ghostty to execute '<path>'?")
+  --                 that otherwise fires on every single invocation, since
+  --                 each temp file has a fresh random name LaunchServices
+  --                 has never consented to before (confirmed the hard way:
+  --                 going through `open -na Ghostty --args -e ...`
+  --                 sometimes routed the request to an already-running
+  --                 Ghostty instance via Apple Events instead of a truly
+  --                 new process, surfacing as a duplicate tab on top of
+  --                 the consent prompt). "window" instances do accumulate
+  --                 over invocations, but each one is fully independent.
   --   "keystroke" - type `nvim <path>` into whatever shell is currently
   --                 focused. Racy (depends on a shell already being
   --                 focused and idle); last resort.
   hostMode = "window",
 
-  -- "window"/"keystroke" mode.
+  -- "window"/"keystroke" mode. In "window" mode, the actual executable run
+  -- is `ghosttyAppPath .. "/Contents/MacOS/ghostty"` (see launchHost).
   ghosttyAppPath = "/Applications/Ghostty.app",
   nvimPath = "nvim",
 }
@@ -150,6 +163,21 @@ function obj:notify(msg, persistent)
   end
 end
 
+-- Human-readable "<app> - <window title> - <field label>" for notify()
+-- messages. Each part is independently optional -- window title and field
+-- label are both frequently unavailable (e.g. a field with no enclosing
+-- window title, like a Spotlight-style panel; or a field with no
+-- placeholder/label at all) -- so this joins whatever's actually present
+-- rather than requiring all three.
+local function describeTarget(app, win, elem)
+  local parts = { app and app:title() or "unknown app" }
+  local winTitle = win and win:title()
+  if winTitle and winTitle ~= "" then table.insert(parts, winTitle) end
+  local fieldLabel = elem and capture.describeElement(elem)
+  if fieldLabel then table.insert(parts, fieldLabel) end
+  return table.concat(parts, " - ")
+end
+
 local function writeFile(path, contents)
   local f, err = io.open(path, "wb")
   if not f then return false, err end
@@ -174,20 +202,44 @@ end
 -- avoids that -- same fix editWithEmacs.spoon uses for emacsclient calls.
 obj._pendingTasks = {}
 
-function obj:runTask(launchPath, args)
+function obj:runTask(launchPath, args, env)
   local task
   task = hs.task.new(launchPath, function()
     self._pendingTasks[task] = nil
   end, args)
+  if env then task:setEnvironment(env) end
   self._pendingTasks[task] = true
   task:start()
+end
+
+-- Single-quotes a string for safe embedding in a shell command.
+local function shQuote(s)
+  return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
 function obj:launchHost(path)
   local mode = self.config.hostMode
   if mode == "window" then
-    self:runTask("/usr/bin/open",
-      { "-na", self.config.ghosttyAppPath, "--args", "-e", resolveNvimPath(self.config.nvimPath), path })
+    -- The temp file path is passed via $INSTANTVIM_PATH, not as a literal
+    -- argument, and resolved inside a login shell rather than handed
+    -- straight to `-e`. Ghostty's own AppKit integration inspects `-e`'s
+    -- resolved command for arguments that are existing files and, if found,
+    -- unconditionally shows an "Allow Ghostty to execute '<path>'?" prompt
+    -- before running it (a deliberate sandbox-escape mitigation on
+    -- Ghostty's side, not a bug) -- and, worse, ends up creating a second,
+    -- separate surface for it alongside the one from our own `-e` command
+    -- (confirmed the hard way: the extra tab literally tries to run the
+    -- temp file's contents as a shell script, then exits). Since the path
+    -- only ever appears inside a shell variable reference, never as a
+    -- literal argument, neither of those trigger. The login shell (`-l`)
+    -- also picks up PATH from your shell profile, same reasoning as
+    -- resolveNvimPath below, so nvimPath doesn't strictly need to be an
+    -- absolute path here anymore -- resolving it anyway keeps this working
+    -- even if config.nvimPath is overridden with something unusual.
+    local shell = os.getenv("SHELL") or "/bin/zsh"
+    local cmd = "exec " .. shQuote(resolveNvimPath(self.config.nvimPath)) .. ' "$INSTANTVIM_PATH"'
+    self:runTask(self.config.ghosttyAppPath .. "/Contents/MacOS/ghostty",
+      { "-e", shell, "-lc", cmd }, { INSTANTVIM_PATH = path })
   elseif mode == "keystroke" then
     hs.timer.doAfter(0.3, function()
       hs.eventtap.keyStrokes(self.config.nvimPath .. " " .. path .. "\n")
@@ -213,8 +265,11 @@ function obj:edit()
 
   -- Stash the source app now: by write-back time focus is on the
   -- terminal, so frontmostApplication() would return Ghostty (constraint
-  -- #5).
+  -- #5). Same for the window title -- grabbed now for the notify()
+  -- messages below, since by close time focus has long since moved on.
   local app = hs.application.frontmostApplication()
+  local win = app and app:focusedWindow()
+  local label = describeTarget(app, win, elem)
 
   capture.probe(elem, function(result)
     local tier = self.config.tierOverrideByBundleID[app and app:bundleID()] or result.tier
@@ -239,11 +294,15 @@ function obj:edit()
       app = app,
       pid = app and app:pid(),
       path = path,
+      label = label,
     }
 
-    self:notify(string.format("Tier %s - %s", tier, tier == "A" and "live sync" or "sync on quit"))
+    self:notify(string.format("Tier %s (%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", label))
     self:setStatus(string.format("editing (%s)", tier))
-    self:launchHost(path)
+    -- Give the alert above a moment on screen before the host window
+    -- appears and steals attention -- hs.alert floats above other windows,
+    -- but launching immediately made it too easy to miss in practice.
+    hs.timer.doAfter(0.2, function() self:launchHost(path) end)
   end)
 end
 
@@ -303,6 +362,7 @@ function obj:onClose()
 
   os.remove(s.path)
   self:setStatus("idle")
+  self:notify("edit session closed - " .. (s.label or "unknown target"))
 end
 
 --- Aborts a stuck or unwanted session without writing anything back to the
