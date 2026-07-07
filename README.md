@@ -27,6 +27,21 @@ There is no single write path that works everywhere — the tier is detected
 per field, at runtime. See [`instantvim-handover.md`](instantvim-handover.md)
 for the full design rationale.
 
+### Selection-scoped editing
+
+If you highlight some text before pressing the hotkey, instantvim edits just
+that selection instead of the whole field — write-back replaces only the
+highlighted range, and re-highlights whatever you wrote in its place so it's
+obvious what changed. No selection at capture time means the usual
+whole-field behavior, unchanged.
+
+This works over both AX write paths: Tier A fields replace via
+`AXSelectedText` (the same attribute VoiceOver/dictation use to type over a
+selection) on every `:w`; Tier B fields capture the selection via a plain
+copy (no select-all) and paste back over it — still on quit only, since
+paste still needs to refocus the source app. Formatting inside the
+selection is not preserved (see [`wishlist.md`](wishlist.md)).
+
 The nvim host runs as a **fresh, throwaway Ghostty instance per edit**
 (`open -na Ghostty --args -e nvim <path>`). An earlier design ran nvim
 inside a dedicated background Ghostty instance's quick terminal instead

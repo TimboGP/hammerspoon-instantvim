@@ -9,7 +9,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "instantvim"
-obj.version = "0.2.0"
+obj.version = "0.3.0"
 obj.author = "tboehm"
 obj.license = "MIT"
 obj.homepage = "https://github.com/TimboGP/hammerspoon-instantvim"
@@ -194,6 +194,23 @@ local function readFile(path)
   return txt
 end
 
+-- Best-effort re-highlight of the just-replaced selection, so a
+-- selection-scoped edit leaves the new text selected the same way typing
+-- over a highlighted range normally would. `range.location` is carried
+-- through unchanged from the original probe (the field isn't focused
+-- during the edit, so nothing else can shift it); only the length changes,
+-- to match the newly written text. Silently a no-op if the element
+-- doesn't support setting its selection range -- this is cosmetic, never
+-- required for the write itself to have succeeded.
+local function reselect(elem, range, newText)
+  pcall(function()
+    elem:setAttributeValue("AXSelectedTextRange", {
+      location = range.location,
+      length = capture.utf16Length(newText),
+    })
+  end)
+end
+
 -- Fire-and-forget subprocesses (`open`, etc). hs.task objects with no live
 -- Lua reference can be garbage-collected before their process finishes,
 -- silently dropping the call (confirmed empirically: a bare
@@ -291,13 +308,16 @@ function obj:edit()
     self.session = {
       elem = elem,
       tier = tier,
+      scope = result.scope,
+      selRange = result.selRange,
       app = app,
       pid = app and app:pid(),
       path = path,
       label = label,
     }
 
-    self:notify(string.format("Tier %s (%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", label))
+    local scopeLabel = result.scope == "selection" and ", selection" or ""
+    self:notify(string.format("Tier %s (%s%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", scopeLabel, label))
     self:setStatus(string.format("editing (%s)", tier))
     -- Give the alert above a moment on screen before the host window
     -- appears and steals attention -- hs.alert floats above other windows,
@@ -323,11 +343,20 @@ function obj:writeBack()
   local txt = readFile(s.path)
   if txt == nil then return end
 
-  local ok = pcall(function() s.elem:setAttributeValue("AXValue", txt) end)
+  -- Selection scope replaces just the originally-highlighted range via
+  -- AXSelectedText, the same attribute VoiceOver/dictation use to type
+  -- over a selection, instead of AXValue's whole-field replace.
+  local attr = (s.scope == "selection") and "AXSelectedText" or "AXValue"
+  local ok = pcall(function() s.elem:setAttributeValue(attr, txt) end)
   if not ok then
     self.logger.w("setAttributeValue failed; degrading to paste-on-quit")
     s.tier = "B"
     self:notify("live write failed - will paste on quit instead", true)
+    return
+  end
+
+  if s.scope == "selection" and s.selRange then
+    reselect(s.elem, s.selRange, txt)
   end
 end
 
@@ -348,8 +377,17 @@ function obj:onClose()
       s.app:activate()
       hs.timer.doAfter(0.15, function()
         hs.pasteboard.setContents(txt)
-        hs.eventtap.keyStroke({ "cmd" }, "a")
+        -- Selection scope relies on the source field's own selection
+        -- still being highlighted (untouched since capture, since the
+        -- field was never refocused during the edit) -- select-all here
+        -- would blow that away and paste over the whole field instead.
+        if s.scope ~= "selection" then
+          hs.eventtap.keyStroke({ "cmd" }, "a")
+        end
         hs.eventtap.keyStroke({ "cmd" }, "v")
+        if s.scope == "selection" and s.selRange and capture.isElementAlive(s.elem) then
+          reselect(s.elem, s.selRange, txt)
+        end
         hs.timer.doAfter(0.15, function()
           hs.pasteboard.setContents(saved or "")
         end)

@@ -53,13 +53,49 @@ function M.isElementAlive(elem)
   return ok and role ~= nil
 end
 
+local function readAttribute(elem, name)
+  local ok, value = pcall(function() return elem:attributeValue(name) end)
+  if ok then return value end
+  return nil
+end
+
+local function isSettable(elem, name)
+  local ok, settable = pcall(function() return elem:isAttributeSettable(name) end)
+  return ok and settable or false
+end
+
+--- UTF-16 code unit length of `s` -- what AXSelectedTextRange's `length`
+--- means, not `s`'s UTF-8 byte length. Only matters for characters outside
+--- the BMP (emoji, some CJK extensions), which are 2 UTF-16 units but more
+--- than 2 UTF-8 bytes; getting this wrong just makes the post-write
+--- reselect highlight a slightly wrong range, never the write itself, so a
+--- byte-length fallback on invalid UTF-8 is an acceptable degradation.
+function M.utf16Length(s)
+  local ok, n = pcall(function()
+    local count = 0
+    for _, cp in utf8.codes(s) do
+      count = count + (cp > 0xFFFF and 2 or 1)
+    end
+    return count
+  end)
+  return ok and n or #s
+end
+
 --- Probe `elem` and classify it into a tier. Always async (callback-style)
 --- because the clipboard fallback needs a short delay to let the target app
 --- react to synthesized keystrokes; callers should not assume a same-tick
 --- response.
 ---
 --- callback receives a single table:
----   { tier = "A"|"B"|"C", value = string|nil, reason = string|nil }
+---   { tier = "A"|"B"|"C", scope = "document"|"selection", value = string|nil,
+---     selRange = {location=,length=}|nil, reason = string|nil }
+---
+--- scope is "selection" whenever the user had already highlighted text at
+--- capture time -- write-back then replaces just that range instead of the
+--- whole field (handover §9's "selection vs whole-field" open question).
+--- selRange, when present, is the AX range (in AXSelectedTextRange's native
+--- units) the selection occupied, kept only so write-back can re-highlight
+--- the replaced text afterwards -- it is never used to splice document text.
 function M.probe(elem, callback)
   if isSecure(elem) then
     callback({ tier = "C", reason = "field is secure" })
@@ -75,37 +111,78 @@ function M.probe(elem, callback)
   -- AXValue shortcut entirely for this role and always use the
   -- select-all+copy fallback below, which reads real text and correctly
   -- downgrades write-back to paste-on-quit instead of a setAttributeValue
-  -- that wouldn't do anything.
+  -- that wouldn't do anything. Selection detection for this role goes
+  -- through the same clipboard-based path below rather than trusting its
+  -- AXSelectedText, for the same reason.
   local roleOk, role = pcall(function() return elem:attributeValue("AXRole") end)
   local isWebArea = roleOk and role == "AXWebArea"
 
   if not isWebArea then
     local ok, value = pcall(function() return elem:attributeValue("AXValue") end)
     if ok and type(value) == "string" then
-      local settableOk, settable = pcall(function() return elem:isAttributeSettable("AXValue") end)
-      local tier = (settableOk and settable) and "A" or "B"
-      callback({ tier = tier, value = value })
+      local tier = isSettable(elem, "AXValue") and "A" or "B"
+
+      -- A highlighted selection scopes the edit to just that range.
+      -- AXSelectedText is a real replace-in-place attribute (the same
+      -- mechanism VoiceOver/dictation use to replace a selection), so it
+      -- gets its own independent settable check rather than assuming it
+      -- follows AXValue's.
+      local selText = readAttribute(elem, "AXSelectedText")
+      if type(selText) == "string" and selText ~= "" then
+        local selTier = isSettable(elem, "AXSelectedText") and "A" or "B"
+        local range = readAttribute(elem, "AXSelectedTextRange")
+        callback({ tier = selTier, scope = "selection", value = selText, selRange = range })
+        return
+      end
+
+      callback({ tier = tier, scope = "document", value = value })
       return
     end
   end
 
-  -- AXValue unreadable but confirmed non-secure: try the select-all+copy
-  -- fallback (handover §4.1's "AX, or select-all+copy fallback" Tier B read
-  -- path). Save/restore the clipboard around the probe itself; write-back's
-  -- own clipboard save/restore (init.lua:onClose) is separate and later.
+  -- AXValue unreadable (or a WebKit editable region): fall back to the
+  -- clipboard. Save/restore the clipboard around the probe itself;
+  -- write-back's own clipboard save/restore (init.lua:onClose) is separate
+  -- and later.
   local saved = hs.pasteboard.getContents()
+
+  -- select-all+copy fallback (handover §4.1's "AX, or select-all+copy
+  -- fallback" Tier B read path) -- whole-field capture, used when there's
+  -- no selection to scope to.
+  local function wholeFieldFallback()
+    hs.pasteboard.setContents(SENTINEL)
+    local before = hs.pasteboard.changeCount()
+    hs.eventtap.keyStroke({ "cmd" }, "a")
+    hs.eventtap.keyStroke({ "cmd" }, "c")
+    hs.timer.doAfter(0.2, function()
+      local changed = hs.pasteboard.changeCount() ~= before
+      local text = changed and hs.pasteboard.getContents() or nil
+      hs.pasteboard.setContents(saved or "")
+      if text and text ~= SENTINEL then
+        callback({ tier = "B", scope = "document", value = text })
+      else
+        callback({ tier = "C", reason = "field did not respond to AX or copy" })
+      end
+    end)
+  end
+
+  -- Try a bare copy first (no Cmd+A): if the user had already highlighted
+  -- something, this captures just that selection, same scoping the AX path
+  -- above gets for free via AXSelectedText. An unchanged/empty result just
+  -- means there's no selection (or the field ignores keystrokes entirely,
+  -- which wholeFieldFallback will also discover) -- either way, fall
+  -- through rather than treating it as a final answer.
   hs.pasteboard.setContents(SENTINEL)
   local before = hs.pasteboard.changeCount()
-  hs.eventtap.keyStroke({ "cmd" }, "a")
   hs.eventtap.keyStroke({ "cmd" }, "c")
   hs.timer.doAfter(0.2, function()
     local changed = hs.pasteboard.changeCount() ~= before
     local text = changed and hs.pasteboard.getContents() or nil
-    hs.pasteboard.setContents(saved or "")
-    if text and text ~= SENTINEL then
-      callback({ tier = "B", value = text })
+    if text and text ~= SENTINEL and text ~= "" then
+      hs.pasteboard.setContents(saved or "")
+      callback({ tier = "B", scope = "selection", value = text })
     else
-      callback({ tier = "C", reason = "field did not respond to AX or copy" })
+      wholeFieldFallback()
     end
   end)
 end
