@@ -221,7 +221,7 @@ vim.api.nvim_create_autocmd("BufWritePost", {
 
 ## 9. Open questions (decide during build)
 
-- **Selection vs whole-field.** editWithEmacs offers "edit selection" and "edit all." v0 does whole-field only. Selection-scoped editing needs `AXSelectedText`/`AXSelectedTextRange`, which are unreliable in Tier B — probably keep whole-field only unless the field is Tier A.
+- ~~**Selection vs whole-field.**~~ **Resolved (v0.3):** a highlighted selection at capture time scopes both read and write-back to just that range, on both Tier A (`AXSelectedText`, live) and Tier B (plain copy/paste, on quit) — see README's "Selection-scoped editing". `AXSelectedTextRange` is read at capture only to re-highlight the replaced text afterwards, never to splice document text, which sidesteps needing it to be reliable in Tier B.
 - **Filetype inference.** Worth a per-app/per-URL map (Tier A native code editor → detect language)? Or always `.md`? Start with `.md`.
 - **Concurrency.** Single quick terminal ⇒ one edit session at a time. Enforce a lock; ignore or queue a second hotkey press while a session is open.
 - **Ghostty version drift.** Re-check Constraint #6 against the installed version at build time; if macOS `+new-window --command` works now, replace the FIFO dispatcher with a direct IPC call.
