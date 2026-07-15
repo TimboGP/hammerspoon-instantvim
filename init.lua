@@ -19,6 +19,10 @@ obj.spoonPath = hs.spoons.scriptPath()
 local capture = dofile(obj.spoonPath .. "capture.lua")
 local menubar = dofile(obj.spoonPath .. "menubar.lua")
 local richtext = dofile(obj.spoonPath .. "richtext.lua")
+-- Slack needs a bespoke adapter (proprietary clipboard); it registers its own
+-- profile rather than using a generic UTI+pandoc one. See slack.lua.
+local slack = dofile(obj.spoonPath .. "slack.lua")
+richtext.profiles.slack = slack.profile
 
 obj.logger = hs.logger.new("instantvim")
 
@@ -85,6 +89,7 @@ obj.config = {
     ["company.thebrowser.Browser"] = "html", -- Arc
     ["org.mozilla.firefox"] = "html",
     ["com.apple.mail"] = "html",
+    ["com.tinyspeck.slackmacgap"] = "slack", -- bespoke adapter, see slack.lua
   },
 
   -- pandoc, used for the rich round-trip above. Resolved via your login

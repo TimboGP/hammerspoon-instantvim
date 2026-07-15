@@ -54,7 +54,7 @@ it reads the field's rich content off the pasteboard, converts it to Markdown
 (via `pandoc`) for editing in nvim, then converts your edited Markdown back
 and pastes it.
 
-Two converter profiles ship, keyed per app by bundle ID:
+Three converters ship, keyed per app by bundle ID:
 
 - **`rtf`** — apps that publish `public.rtf` (native Cocoa fields, and
   RTF-on-the-pasteboard apps like Word). TextEdit and Microsoft Word are the
@@ -63,6 +63,11 @@ Two converter profiles ship, keyed per app by bundle ID:
   browsers (Safari, Chrome, Edge, Brave, Arc, Firefox) and rich mail compose
   (Apple Mail) ship mapped to this. Verified against a live browser. Extend it
   with any bundle ID whose fields are HTML editors.
+- **`slack`** — a bespoke adapter ([`slack.lua`](slack.lua)) for Slack, which
+  doesn't publish standard rich UTIs: it captures by parsing the Quill Delta
+  Slack hides in `org.chromium.web-custom-data`, and writes back via HTML
+  (which Slack's editor re-imports). Verified end-to-end. This is the template
+  for other apps with proprietary clipboards.
 
 Every other app keeps plain-text behavior until you opt it in.
 
@@ -157,9 +162,9 @@ All configuration lives in `spoon.instantvim.config` (see
   **`false` by default**. Enabling it (here or via the menu bar) runs a
   `pandoc` check and notifies if it's missing.
 - `contentTypeByBundleID` — which apps round-trip formatting *when
-  `enableRichText` is true*, mapping a bundle ID to a converter profile
-  (`"rtf"` or `"html"`). Ships with TextEdit → `rtf` and the common browsers
-  + Apple Mail → `html`; unlisted apps stay plain-text.
+  `enableRichText` is true*, mapping a bundle ID to a converter (`"rtf"`,
+  `"html"`, or `"slack"`). Ships with TextEdit → `rtf`, the common browsers +
+  Apple Mail → `html`, and Slack → `slack`; unlisted apps stay plain-text.
 - `pandocPath` — the `pandoc` used for the rich-text round-trip, default
   `"pandoc"` (resolved via your login shell, then cached).
 
@@ -171,7 +176,8 @@ The repo root doubles as the `.spoon` directory (same convention as
 
 ```
 init.lua, capture.lua, menubar.lua   hotkey, AX capture/probe, tier engine, menu bar
-richtext.lua                          rich-text (RTF↔Markdown) round-trip, prototype
+richtext.lua                          rich-text round-trip (RTF/HTML profiles), prototype
+slack.lua                             bespoke Slack adapter (Quill Delta ↔ Markdown)
 nvim/                                 BufWritePost / VimLeave wiring
 install.sh
 ```
