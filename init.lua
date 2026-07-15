@@ -73,6 +73,7 @@ obj.config = {
   -- extended with any bundle ID whose fields are HTML contentEditable.
   contentTypeByBundleID = {
     ["com.apple.TextEdit"] = "rtf",
+    ["com.microsoft.Word"] = "rtf", -- Word's HTML clipboard is cruft-heavy; prefer RTF
     ["com.apple.Safari"] = "html",
     ["com.google.Chrome"] = "html",
     ["com.microsoft.Edge"] = "html",

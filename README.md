@@ -56,11 +56,13 @@ and pastes it.
 
 Two converter profiles ship, keyed per app by bundle ID:
 
-- **`rtf`** — native Cocoa fields (`public.rtf`). TextEdit is the tested target.
+- **`rtf`** — apps that publish `public.rtf` (native Cocoa fields, and
+  RTF-on-the-pasteboard apps like Word). TextEdit and Microsoft Word are the
+  tested targets.
 - **`html`** — web/Electron `contentEditable` surfaces (`public.html`):
   browsers (Safari, Chrome, Edge, Brave, Arc, Firefox) and rich mail compose
-  (Apple Mail) ship mapped to this. Extend it with any bundle ID whose fields
-  are HTML editors.
+  (Apple Mail) ship mapped to this. Verified against a live browser. Extend it
+  with any bundle ID whose fields are HTML editors.
 
 Every other app keeps plain-text behavior until you opt it in.
 

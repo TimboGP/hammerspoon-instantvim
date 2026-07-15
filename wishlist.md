@@ -43,11 +43,13 @@ A first slice of the sketch below is now implemented — see
 
 ### Still deferred
 
-- **Live per-app fidelity testing.** The RTF path is verified end-to-end
-  against TextEdit; the HTML path is verified at the conversion + pasteboard
-  level but its live `contentEditable` round-trip (browsers, Electron) is not
-  yet confirmed on real apps. Each app differs in which UTI it
-  publishes/accepts and how faithfully it round-trips through Markdown.
+- **Broaden verified apps.** The RTF path is verified end-to-end against
+  TextEdit and Microsoft Word; the HTML path against a live browser. Still
+  unverified: Pages, Notes, and Electron chat apps (Slack, Notion, Discord),
+  each of which differs in which UTI it publishes/accepts and how faithfully
+  it round-trips through Markdown. (Word, notably, publishes `public.rtf`,
+  `public.html`, `com.apple.flat-rtfd`, and `com.adobe.pdf` all at once; the
+  priority list picks the cleanest, `public.rtf`.)
 - **Fidelity edge cases.** Some formatting (nested styles, tables, comments,
   tracked changes) won't round-trip cleanly through Markdown regardless of
   converter. The prototype accepts this; a general solution would need a
