@@ -44,12 +44,26 @@ A first slice of the sketch below is now implemented — see
 ### Still deferred
 
 - **Broaden verified apps.** The RTF path is verified end-to-end against
-  TextEdit and Microsoft Word; the HTML path against a live browser. Still
-  unverified: Pages, Notes, and Electron chat apps (Slack, Notion, Discord),
-  each of which differs in which UTI it publishes/accepts and how faithfully
-  it round-trips through Markdown. (Word, notably, publishes `public.rtf`,
-  `public.html`, `com.apple.flat-rtfd`, and `com.adobe.pdf` all at once; the
-  priority list picks the cleanest, `public.rtf`.)
+  TextEdit and Microsoft Word; the HTML path against a live browser. (Word,
+  notably, publishes `public.rtf`, `public.html`, `com.apple.flat-rtfd`, and
+  `com.adobe.pdf` all at once; the priority list picks the cleanest,
+  `public.rtf`.) **Pages** is expected to fit `rtf` but is untested (not
+  installed on the dev machine); add `["com.apple.iWork.Pages"] = "rtf"` and
+  verify before relying on it. Notes is also plausible-but-untested.
+- **Apps with proprietary clipboards need a per-app adapter (not just a
+  profile).** The profile model assumes an app publishes a standard rich UTI
+  (`public.rtf`/`public.html`). Some don't. **Slack** (checked) is the
+  concrete example: its composer publishes only `public.utf8-plain-text`
+  (formatting stripped) plus Chromium internals — the actual formatting lives
+  in a Slack-proprietary Quill Delta (`{"ops":[...]}`) under a `slack/texty`
+  custom MIME type wrapped inside `org.chromium.web-custom-data`. `captureRep`
+  finds no supported UTI, so Slack correctly degrades to plain text; mapping
+  it to a profile would do nothing. Real support would need a bespoke adapter:
+  unwrap Chromium `web-custom-data` → parse the Quill Delta → convert
+  Delta↔Markdown, both directions. Deliberately not built — fragile,
+  proprietary, and out of scope for the profile-based prototype. Other
+  Electron apps (Notion, Discord) may or may not behave like Slack; each needs
+  its own clipboard probe before assuming `html` works.
 - **Fidelity edge cases.** Some formatting (nested styles, tables, comments,
   tracked changes) won't round-trip cleanly through Markdown regardless of
   converter. The prototype accepts this; a general solution would need a
