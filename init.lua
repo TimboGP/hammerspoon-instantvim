@@ -522,6 +522,23 @@ function obj:bindHotkeys(mapping)
   end
 end
 
+-- hs.settings key under which the rich-text toggle is persisted, so a choice
+-- made from the menu bar survives reloads and app restarts (hs.settings is
+-- backed by NSUserDefaults).
+local RICHTEXT_SETTING = "instantvim.enableRichText"
+
+--- Apply the persisted rich-text toggle, if the user has ever set it from the
+--- menu bar. This takes precedence over config.enableRichText so a menu choice
+--- sticks across reloads; a setup that has never toggled keeps whatever the
+--- config says. Reset by toggling again, or by clearing the
+--- "instantvim.enableRichText" key via hs.settings.
+function obj:loadPersistedState()
+  local persisted = hs.settings.get(RICHTEXT_SETTING)
+  if type(persisted) == "boolean" then
+    self.config.enableRichText = persisted
+  end
+end
+
 --- Verifies the rich-text feature's dependency (pandoc) when it's enabled,
 --- notifying if it's missing (rich-enabled apps then fall back to plain
 --- text). A no-op when the feature is off. Returns whether the dependency is
@@ -539,6 +556,7 @@ end
 --- moment the feature is turned on rather than silently at edit time.
 function obj:toggleRichText()
   self.config.enableRichText = not self.config.enableRichText
+  hs.settings.set(RICHTEXT_SETTING, self.config.enableRichText) -- persist across reloads
   if not self.config.enableRichText then
     self:notify("rich text disabled")
   elseif self:checkRichTextDeps() then
@@ -596,8 +614,10 @@ function obj:start()
   if not ensureHsCli() then
     self:notify("'hs' CLI not found on PATH - live write-back from nvim will not work. See README.", true)
   end
-  -- Rich text is gated behind enableRichText and needs pandoc; checked here
-  -- so enabling it in config surfaces a missing dependency at start.
+  -- Restore a persisted rich-text toggle (menu choice survives reloads),
+  -- then check its dependency; enabling it in config or via a prior toggle
+  -- surfaces a missing pandoc at start.
+  self:loadPersistedState()
   self:checkRichTextDeps()
   self:bindHotkeys({ edit = self.config.hotkey, cancel = self.config.cancelHotkey })
   menubar.start()

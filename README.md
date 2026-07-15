@@ -78,7 +78,9 @@ target picks the richest it understands. The plain-text fallback is always
 included.
 
 Enable it either by setting `spoon.instantvim.config.enableRichText = true`
-before `:start()`, or with the **Rich Text (RTF)** toggle in the menu bar.
+before `:start()`, or with the **Rich Text (RTF)** toggle in the menu bar. The
+menu toggle is **remembered across reloads and restarts** (persisted via
+`hs.settings`), and once set it takes precedence over the config default.
 Either way of enabling runs a check for `pandoc` and notifies you if it's
 missing (rich-enabled apps then fall back to plain text). A conversion that
 fails at edit time also falls back to plain text.
@@ -139,8 +141,9 @@ session state, e.g. "✎ editing (A)"). Its menu:
   field. Disabled when there's no active session. Also bindable as a hotkey
   via `cancelHotkey` (unbound by default).
 - **Host Mode** — switch `window`/`keystroke` live.
-- **Rich Text (RTF)** — toggle the rich-text prototype (see below) on/off.
-  Turning it on runs the `pandoc` check and notifies if it's missing.
+- **Rich Text (RTF)** — toggle the rich-text prototype (see below) on/off;
+  the choice is remembered across reloads/restarts. Turning it on runs the
+  `pandoc` check and notifies if it's missing.
 - **Reload Config** — `hs.reload()`.
 
 ## Configuration
@@ -160,7 +163,9 @@ All configuration lives in `spoon.instantvim.config` (see
   `isAttributeSettable`.
 - `enableRichText` — master gate for the rich-text prototype (see above),
   **`false` by default**. Enabling it (here or via the menu bar) runs a
-  `pandoc` check and notifies if it's missing.
+  `pandoc` check and notifies if it's missing. The menu-bar toggle persists
+  across reloads/restarts (via `hs.settings`) and, once used, overrides this
+  config value.
 - `contentTypeByBundleID` — which apps round-trip formatting *when
   `enableRichText` is true*, mapping a bundle ID to a converter (`"rtf"`,
   `"html"`, or `"slack"`). Ships with TextEdit → `rtf`, the common browsers +
