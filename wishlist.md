@@ -21,15 +21,20 @@ A first slice of the sketch below is now implemented — see
   `config.contentTypeByBundleID` maps a bundle ID to a converter profile;
   apps not listed keep the plain-text behavior — plain text stays the
   universal fallback.
-- **Two profiles.** `rtf` (`public.rtf`) for native Cocoa fields — TextEdit
-  is the tested target — and `html` (`public.html`) for web/Electron
-  `contentEditable` — the common browsers and Apple Mail ship mapped to it.
-- **Capture:** copy the field to the pasteboard, read it under the profile's
-  UTI, convert → Markdown (gfm) via `pandoc` for editing in nvim.
-- **Write-back:** convert edited Markdown back via `pandoc` and put the rich
-  UTI *plus* a plain-text rep on the pasteboard with `writeAllData` (RTF
-  auto-synthesizes plain text; HTML does not, so the plain rep is written
-  explicitly), then paste.
+- **Two profiles, each an ordered list of representations.** `rtf`
+  (`public.rtf`, native Cocoa — TextEdit is the tested target) and `html`
+  (`public.html`, web/Electron `contentEditable` — the common browsers and
+  Apple Mail ship mapped to it). Each profile lists both reps; they differ
+  only in which one they prefer.
+- **Capture:** copy the field to the pasteboard, then pick the *richest
+  representation the app actually published* (first present rep in priority
+  order — so an app mapped to one profile still works if it only publishes
+  the other's UTI), read it, and convert → Markdown (gfm) via `pandoc`.
+- **Write-back:** convert edited Markdown back via `pandoc` into *every* rep
+  the profile knows, and write them all — plus a plain-text rep — with
+  `writeAllData`, so the target picks whichever it understands (native field
+  → RTF, web field → HTML, from one write). RTF auto-synthesizes plain text;
+  HTML does not, so the plain rep is always written explicitly.
 - **Always Tier B.** As predicted below, live (Tier A) rich write-back is
   impossible — `AXValue`/`AXSelectedText` are plain strings — so a rich
   round-trip goes through the paste path (on quit only) even for fields that

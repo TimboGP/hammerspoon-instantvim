@@ -20,14 +20,25 @@ local M = {}
 -- universal fallback. Each profile names the pasteboard UTI that carries the
 -- formatting and the pandoc format tokens used to convert it to/from the
 -- Markdown edited in nvim.
--- `uti`      pasteboard type this profile reads on capture / writes on write-back
--- `from`/`to`  pandoc format tokens for that UTI
--- `standalone` pass pandoc `-s` on write-back? RTF needs its document header;
---            HTML wants a bare fragment (a full <!DOCTYPE>/<head> document
---            pastes badly into contentEditable). See wishlist.md.
+-- A profile is an ordered list of representations (`reps`). Each rep:
+--   `uti`        pasteboard type it reads/writes
+--   `from`/`to`  pandoc format tokens for that UTI
+--   `standalone` pass pandoc `-s` on write-back? RTF needs its document
+--                header; HTML wants a bare fragment (a full <!DOCTYPE>/<head>
+--                document pastes badly into contentEditable).
+--
+-- Rep order is priority order. On CAPTURE the first rep whose UTI is actually
+-- on the pasteboard wins (prefer richest, fall back) -- so an app mapped to
+-- one profile still works if it only publishes the other's UTI. On WRITE-BACK
+-- every rep is produced and written together (see buildPasteboard), so the
+-- target app picks whichever it understands: a native field takes the RTF, a
+-- web field takes the HTML, from a single write. The two profiles below
+-- therefore differ only in which representation they prefer on capture.
+local REP_RTF = { uti = "public.rtf", from = "rtf", to = "rtf", standalone = true }
+local REP_HTML = { uti = "public.html", from = "html", to = "html", standalone = false }
 M.profiles = {
-  rtf = { uti = "public.rtf", from = "rtf", to = "rtf", standalone = true },
-  html = { uti = "public.html", from = "html", to = "html", standalone = false },
+  rtf = { reps = { REP_RTF, REP_HTML } },
+  html = { reps = { REP_HTML, REP_RTF } },
 }
 
 -- gfm is the most human-editable Markdown flavor pandoc emits (plain links,
@@ -100,26 +111,39 @@ function M.available(opts)
   return resolvePandoc(opts) ~= nil
 end
 
---- Rich UTI bytes -> Markdown (capture direction). Returns nil on any failure
---- (empty doc, pandoc missing, malformed input) so the caller can fall back
---- to the plain-text capture it already has.
-function M.toMarkdown(profile, data, opts)
+--- The first rep of `profile` whose UTI is present in `availableTypes` (the
+--- pasteboard's contentTypes), or nil if none is -- i.e. richest-first with
+--- fallback. Lets an app mapped to one profile still capture when it only
+--- publishes the other profile's UTI.
+function M.captureRep(profile, availableTypes)
+  local present = {}
+  for _, uti in ipairs(availableTypes or {}) do present[uti] = true end
+  for _, rep in ipairs(profile.reps) do
+    if present[rep.uti] then return rep end
+  end
+  return nil
+end
+
+--- Rich UTI bytes -> Markdown (capture direction), using `rep`'s pandoc input
+--- format. Returns nil on any failure (empty doc, pandoc missing, malformed
+--- input) so the caller can fall back to the plain-text capture it has.
+function M.toMarkdown(rep, data, opts)
   local p = tmpPath(opts, "rich")
   if not writeBytes(p, data) then return nil end
-  local md = pandoc(opts, string.format("-f %s -t %s --wrap=none", profile.from, M.flavor), p)
+  local md = pandoc(opts, string.format("-f %s -t %s --wrap=none", rep.from, M.flavor), p)
   os.remove(p)
   if md and md:match("%S") then return md end
   return nil
 end
 
---- Markdown -> rich UTI bytes (write-back direction). `standalone` profiles
---- get pandoc `-s` (e.g. RTF's document header); others get a bare fragment.
---- Returns nil on failure so the caller can fall back to pasting plain text.
-function M.toRich(profile, markdown, opts)
+--- Markdown -> rich UTI bytes for `rep` (write-back direction). `standalone`
+--- reps get pandoc `-s` (e.g. RTF's document header); others get a bare
+--- fragment. Returns nil on failure.
+function M.toRich(rep, markdown, opts)
   local p = tmpPath(opts, "md")
   if not writeBytes(p, markdown) then return nil end
-  local args = string.format("-f %s -t %s", M.flavor, profile.to)
-  if profile.standalone then args = args .. " -s" end
+  local args = string.format("-f %s -t %s", M.flavor, rep.to)
+  if rep.standalone then args = args .. " -s" end
   local out = pandoc(opts, args, p)
   os.remove(p)
   if out and out:match("%S") then return out end
@@ -140,19 +164,25 @@ end
 
 --- Build the pasteboard representation of `markdown` for `profile` and return
 --- { data = { [uti] = bytes, ... }, plain = string } ready for
---- hs.pasteboard.writeAllData, or nil if the rich conversion failed (caller
---- then pastes plain text). Plain text is always included as a rep: unlike
---- RTF, writing some UTIs (e.g. public.html) does NOT auto-synthesize it, so
---- a non-rich paste target would otherwise get nothing. `plain` is also the
---- rendered text used to size the selection re-highlight.
+--- hs.pasteboard.writeAllData, or nil if EVERY rep's conversion failed
+--- (caller then pastes plain text). Every rep that converts is included, so
+--- the target app can pick whichever rich type it understands. Plain text is
+--- always included: unlike RTF, writing some UTIs (e.g. public.html) does NOT
+--- auto-synthesize it, so a non-rich paste target would otherwise get
+--- nothing. `plain` is also the rendered text used to size the reselect.
 function M.buildPasteboard(profile, markdown, opts)
-  local rich = M.toRich(profile, markdown, opts)
-  if not rich then return nil end
   local plain = M.toPlain(markdown, opts) or markdown
-  return {
-    data = { [profile.uti] = rich, ["public.utf8-plain-text"] = plain },
-    plain = plain,
-  }
+  local data = { ["public.utf8-plain-text"] = plain }
+  local any = false
+  for _, rep in ipairs(profile.reps) do
+    local rich = M.toRich(rep, markdown, opts)
+    if rich then
+      data[rep.uti] = rich
+      any = true
+    end
+  end
+  if not any then return nil end
+  return { data = data, plain = plain }
 end
 
 return M

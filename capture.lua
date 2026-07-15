@@ -216,19 +216,22 @@ local function upgradeToRich(elem, result, opts, callback)
   end
 
   hs.timer.doAfter(0.2, function()
-    local data
+    local md
     if hs.pasteboard.changeCount() ~= before then
-      data = hs.pasteboard.readDataForUTI(profile.uti)
+      -- Pick the richest representation the app actually published (rep order
+      -- is priority order), then read and convert just that one.
+      local rep = opts.richtext.captureRep(profile, hs.pasteboard.contentTypes())
+      local data = rep and hs.pasteboard.readDataForUTI(rep.uti)
+      if data and #data > 0 then
+        md = opts.richtext.toMarkdown(rep, data, opts)
+      end
     end
     hs.pasteboard.setContents(saved or "")
 
-    if data and #data > 0 then
-      local md = opts.richtext.toMarkdown(profile, data, opts)
-      if md then
-        result.value = md
-        result.tier = "B" -- rich is always paste-on-quit; see richtext.lua
-        result.rich = opts.richProfileName
-      end
+    if md then
+      result.value = md
+      result.tier = "B" -- rich is always paste-on-quit; see richtext.lua
+      result.rich = opts.richProfileName
     end
     callback(result)
   end)

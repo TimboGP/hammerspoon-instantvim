@@ -64,6 +64,12 @@ Two converter profiles ship, keyed per app by bundle ID:
 
 Every other app keeps plain-text behavior until you opt it in.
 
+The profile only sets a *preference*: on capture instantvim reads whichever
+supported format the app actually published (falling back across formats), and
+on write-back it puts every format it can produce on the pasteboard so the
+target picks the richest it understands. The plain-text fallback is always
+included.
+
 Enable it either by setting `spoon.instantvim.config.enableRichText = true`
 before `:start()`, or with the **Rich Text (RTF)** toggle in the menu bar.
 Either way of enabling runs a check for `pandoc` and notifies you if it's
