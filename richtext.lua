@@ -111,23 +111,30 @@ function M.available(opts)
   return resolvePandoc(opts) ~= nil
 end
 
---- The first rep of `profile` whose UTI is present in `availableTypes` (the
---- pasteboard's contentTypes), or nil if none is -- i.e. richest-first with
---- fallback. Lets an app mapped to one profile still capture when it only
---- publishes the other profile's UTI.
+--- The first capture rep of `profile` whose UTI is present in `availableTypes`
+--- (the pasteboard's contentTypes), or nil if none is -- i.e. richest-first
+--- with fallback. Lets an app mapped to one profile still capture when it only
+--- publishes another's UTI. A profile may split capture vs write-back reps
+--- (`captureReps`/`writeReps`); otherwise both use `reps`.
 function M.captureRep(profile, availableTypes)
   local present = {}
   for _, uti in ipairs(availableTypes or {}) do present[uti] = true end
-  for _, rep in ipairs(profile.reps) do
+  for _, rep in ipairs(profile.captureReps or profile.reps) do
     if present[rep.uti] then return rep end
   end
   return nil
 end
 
---- Rich UTI bytes -> Markdown (capture direction), using `rep`'s pandoc input
---- format. Returns nil on any failure (empty doc, pandoc missing, malformed
---- input) so the caller can fall back to the plain-text capture it has.
+--- Rich UTI bytes -> Markdown (capture direction). A rep may supply a custom
+--- `captureFn(data, opts)` (e.g. an app-specific clipboard format); otherwise
+--- pandoc converts from `rep.from`. Returns nil on any failure (empty doc,
+--- pandoc missing, malformed input) so the caller can fall back to plain text.
 function M.toMarkdown(rep, data, opts)
+  if rep.captureFn then
+    local ok, md = pcall(rep.captureFn, data, opts)
+    if ok and md and md:match("%S") then return md end
+    return nil
+  end
   local p = tmpPath(opts, "rich")
   if not writeBytes(p, data) then return nil end
   local md = pandoc(opts, string.format("-f %s -t %s --wrap=none", rep.from, M.flavor), p)
@@ -146,8 +153,10 @@ function M.toRich(rep, markdown, opts)
   if rep.standalone then args = args .. " -s" end
   local out = pandoc(opts, args, p)
   os.remove(p)
-  if out and out:match("%S") then return out end
-  return nil
+  if not (out and out:match("%S")) then return nil end
+  -- optional per-rep post-processing (e.g. target-specific tag fixups)
+  if rep.post then out = rep.post(out) end
+  return out
 end
 
 --- Markdown -> plain text. Used only to size the selection re-highlight after
@@ -174,7 +183,7 @@ function M.buildPasteboard(profile, markdown, opts)
   local plain = M.toPlain(markdown, opts) or markdown
   local data = { ["public.utf8-plain-text"] = plain }
   local any = false
-  for _, rep in ipairs(profile.reps) do
+  for _, rep in ipairs(profile.writeReps or profile.reps) do
     local rich = M.toRich(rep, markdown, opts)
     if rich then
       data[rep.uti] = rich

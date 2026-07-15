@@ -10,10 +10,10 @@ a selection inside Word, Pages, Notes, Mail's rich compose, etc. round-trips
 through nvim as plain text and loses any bold/italic/links/etc. within the
 replaced range. instantvim's whole model is plain-text-in-nvim.
 
-### Prototype (shipped): RTF via pandoc
+### Shipped
 
-A first slice of the sketch below is now implemented — see
-[`richtext.lua`](richtext.lua) and `contentTypeByBundleID` in the README:
+The sketch below is implemented — see [`richtext.lua`](richtext.lua),
+[`slack.lua`](slack.lua), and `contentTypeByBundleID` in the README:
 
 - **Gated, off by default.** The whole path is behind `config.enableRichText`
   (default `false`); enabling it — in config or via the menu-bar toggle —
@@ -40,6 +40,18 @@ A first slice of the sketch below is now implemented — see
   round-trip goes through the paste path (on quit only) even for fields that
   would otherwise be Tier A. If pandoc is missing or a conversion fails, the
   field degrades cleanly to the plain-text path.
+- **Bespoke adapters for apps with proprietary clipboards.** A rep may carry a
+  custom `captureFn` and/or a `post` hook instead of relying on a standard UTI
+  + pandoc, and a profile may split `captureReps` from `writeReps`. **Slack**
+  ([`slack.lua`](slack.lua), verified end-to-end) is the first: its composer
+  publishes only `public.utf8-plain-text` (formatting stripped) plus Chromium
+  internals — the real formatting is a Quill Delta under a `slack/texty` custom
+  MIME type inside `org.chromium.web-custom-data`. **Capture** is bespoke:
+  unwrap the Chromium pickle, pull out `slack/texty`, convert the Delta →
+  Markdown (bold/italic/strike/underline/code/link, bullet + ordered lists,
+  code blocks, blockquote). **Write-back** is asymmetric and reuses the `html`
+  path — Slack's Quill converts pasted HTML back into its own format — with one
+  fixup: Quill wants `<s>` for strikethrough where pandoc emits `<del>`.
 
 ### Still deferred
 
@@ -62,20 +74,17 @@ A first slice of the sketch below is now implemented — see
   A real fix needs an iWork-aware representation that preserves named styles —
   out of scope for the Markdown-based prototype. Anyone who only edits
   uniform-style Pages text can opt in with `["com.apple.Pages"] = "rtf"`.
-- **Apps with proprietary clipboards need a per-app adapter (not just a
-  profile).** The profile model assumes an app publishes a standard rich UTI
-  (`public.rtf`/`public.html`). Some don't. **Slack** (checked) is the
-  concrete example: its composer publishes only `public.utf8-plain-text`
-  (formatting stripped) plus Chromium internals — the actual formatting lives
-  in a Slack-proprietary Quill Delta (`{"ops":[...]}`) under a `slack/texty`
-  custom MIME type wrapped inside `org.chromium.web-custom-data`. `captureRep`
-  finds no supported UTI, so Slack correctly degrades to plain text; mapping
-  it to a profile would do nothing. Real support would need a bespoke adapter:
-  unwrap Chromium `web-custom-data` → parse the Quill Delta → convert
-  Delta↔Markdown, both directions. Deliberately not built — fragile,
-  proprietary, and out of scope for the profile-based prototype. Other
-  Electron apps (Notion, Discord) may or may not behave like Slack; each needs
-  its own clipboard probe before assuming `html` works.
+- **More proprietary-clipboard apps.** Slack now has a bespoke adapter (see
+  Shipped), but other Electron apps (Notion, Discord) may each use their own
+  clipboard format rather than standard `public.html` — probe each before
+  assuming `html` works, and add a `slack.lua`-style adapter where it doesn't.
+- **Slack write-back is HTML-based, not Delta-based.** Capture parses Slack's
+  Quill Delta, but write-back leans on Slack's own HTML→Delta paste conversion
+  rather than reconstructing a `slack/texty` Delta + Chromium pickle. That's
+  simpler and works, but means write-back fidelity is bounded by what Slack's
+  paste importer accepts (it's why strikethrough needed the `<del>`→`<s>`
+  fixup). Synthesizing the Delta directly would be higher-fidelity but is
+  fragile, proprietary work — deferred unless HTML paste proves insufficient.
 - **Fidelity edge cases.** Some formatting (nested styles, tables, comments,
   tracked changes) won't round-trip cleanly through Markdown regardless of
   converter. The prototype accepts this; a general solution would need a
