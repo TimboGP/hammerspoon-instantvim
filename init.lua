@@ -74,6 +74,10 @@ obj.config = {
   contentTypeByBundleID = {
     ["com.apple.TextEdit"] = "rtf",
     ["com.microsoft.Word"] = "rtf", -- Word's HTML clipboard is cruft-heavy; prefer RTF
+    -- Pages (com.apple.Pages) deliberately NOT mapped: capture works, but its
+    -- named paragraph styles (Body/Title/Heading) have no Markdown equivalent,
+    -- so RTF write-back collapses a mixed-style selection onto the paste
+    -- point's style. See wishlist.md.
     ["com.apple.Safari"] = "html",
     ["com.google.Chrome"] = "html",
     ["com.microsoft.Edge"] = "html",

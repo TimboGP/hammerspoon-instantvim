@@ -47,9 +47,21 @@ A first slice of the sketch below is now implemented — see
   TextEdit and Microsoft Word; the HTML path against a live browser. (Word,
   notably, publishes `public.rtf`, `public.html`, `com.apple.flat-rtfd`, and
   `com.adobe.pdf` all at once; the priority list picks the cleanest,
-  `public.rtf`.) **Pages** is expected to fit `rtf` but is untested (not
-  installed on the dev machine); add `["com.apple.iWork.Pages"] = "rtf"` and
-  verify before relying on it. Notes is also plausible-but-untested.
+  `public.rtf`.) Notes is a plausible-but-untested `rtf` candidate.
+- **Named paragraph styles don't round-trip (Pages).** `Pages`
+  (`com.apple.Pages`, checked) captures fine via `public.rtf`, but write-back
+  is broken enough to be worse than not mapping it, so it is deliberately
+  left out. Pages documents are built on *named paragraph styles* (Body,
+  Title, Heading N) that have no Markdown equivalent — they're dropped at
+  capture and can't be reconstructed. On write-back, pandoc's RTF carries
+  only direct formatting (`\b`, `\fs36`) and no stylesheet, so pasting it into
+  Pages keeps the paste point's paragraph style and layers our formatting as
+  overrides: a mixed-style selection **collapses onto the first word's style**
+  (shown as e.g. `Body*`, the asterisk meaning "modified"). Fine for
+  single-style (all-Body) content; damaging for anything with headings/titles.
+  A real fix needs an iWork-aware representation that preserves named styles —
+  out of scope for the Markdown-based prototype. Anyone who only edits
+  uniform-style Pages text can opt in with `["com.apple.Pages"] = "rtf"`.
 - **Apps with proprietary clipboards need a per-app adapter (not just a
   profile).** The profile model assumes an app publishes a standard rich UTI
   (`public.rtf`/`public.html`). Some don't. **Slack** (checked) is the
