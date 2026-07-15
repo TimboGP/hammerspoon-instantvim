@@ -81,10 +81,10 @@ function M.utf16Length(s)
   return ok and n or #s
 end
 
---- Probe `elem` and classify it into a tier. Always async (callback-style)
---- because the clipboard fallback needs a short delay to let the target app
---- react to synthesized keystrokes; callers should not assume a same-tick
---- response.
+--- Plain-text probe: classify `elem` into a tier and read its contents as
+--- plain text. Always async (callback-style) because the clipboard fallback
+--- needs a short delay to let the target app react to synthesized keystrokes;
+--- callers should not assume a same-tick response.
 ---
 --- callback receives a single table:
 ---   { tier = "A"|"B"|"C", scope = "document"|"selection", value = string|nil,
@@ -96,7 +96,10 @@ end
 --- selRange, when present, is the AX range (in AXSelectedTextRange's native
 --- units) the selection occupied, kept only so write-back can re-highlight
 --- the replaced text afterwards -- it is never used to splice document text.
-function M.probe(elem, callback)
+---
+--- This is the universal path. M.probe below wraps it to optionally upgrade
+--- the result to a rich-text (formatted) capture for opted-in apps.
+function M.probePlain(elem, callback)
   if isSecure(elem) then
     callback({ tier = "C", reason = "field is secure" })
     return
@@ -184,6 +187,69 @@ function M.probe(elem, callback)
     else
       wholeFieldFallback()
     end
+  end)
+end
+
+--- Second pass over a successful plain capture: copy the field's rich
+--- content to the pasteboard, read it under the profile's UTI, and convert it
+--- to Markdown. On success, rewrites `result` in place (value -> Markdown,
+--- tier -> "B", rich -> profile name) and hands it back. On any failure --
+--- the app didn't publish that UTI, or pandoc isn't available/choked -- the
+--- untouched plain `result` is handed back unchanged, so a rich-enabled app
+--- degrades cleanly to plain text.
+---
+--- Scope detection is deliberately left to probePlain (which ran first, off
+--- the AX attributes, before any Cmd+A here could disturb the selection): a
+--- "selection" capture uses a bare Cmd+C so the highlight survives for the
+--- paste-on-quit write-back, while a "document" capture selects all first.
+local function upgradeToRich(elem, result, opts, callback)
+  local profile = opts.richProfile
+  local saved = hs.pasteboard.getContents()
+
+  hs.pasteboard.clearContents()
+  local before = hs.pasteboard.changeCount()
+  if result.scope == "selection" then
+    hs.eventtap.keyStroke({ "cmd" }, "c")
+  else
+    hs.eventtap.keyStroke({ "cmd" }, "a")
+    hs.eventtap.keyStroke({ "cmd" }, "c")
+  end
+
+  hs.timer.doAfter(0.2, function()
+    local md
+    if hs.pasteboard.changeCount() ~= before then
+      -- Pick the richest representation the app actually published (rep order
+      -- is priority order), then read and convert just that one.
+      local rep = opts.richtext.captureRep(profile, hs.pasteboard.contentTypes())
+      local data = rep and hs.pasteboard.readDataForUTI(rep.uti)
+      if data and #data > 0 then
+        md = opts.richtext.toMarkdown(rep, data, opts)
+      end
+    end
+    hs.pasteboard.setContents(saved or "")
+
+    if md then
+      result.value = md
+      result.tier = "B" -- rich is always paste-on-quit; see richtext.lua
+      result.rich = opts.richProfileName
+    end
+    callback(result)
+  end)
+end
+
+--- Probe `elem`, optionally upgrading the result to a rich-text capture.
+---
+--- Runs the plain probe first, then -- when opts.richProfile is set and the
+--- field turned out readable (tier A/B) -- upgrades it via upgradeToRich.
+--- opts (all optional): { richProfile, richProfileName, richtext, pandocPath,
+--- tempDir }. With no opts, this is exactly probePlain.
+function M.probe(elem, opts, callback)
+  M.probePlain(elem, function(result)
+    if result.tier == "C" or not (opts and opts.richProfile) then
+      callback(result)
+      return
+    end
+    upgradeToRich(elem, result, opts, callback)
   end)
 end
 

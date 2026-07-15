@@ -40,7 +40,48 @@ This works over both AX write paths: Tier A fields replace via
 selection) on every `:w`; Tier B fields capture the selection via a plain
 copy (no select-all) and paste back over it — still on quit only, since
 paste still needs to refocus the source app. Formatting inside the
-selection is not preserved (see [`wishlist.md`](wishlist.md)).
+selection is preserved only for apps opted into the rich-text prototype
+(see below); everywhere else the round-trip is plain text.
+
+### Rich text (prototype)
+
+A field round-trips through nvim as **plain text** by default, so editing
+formatted content (Word, Pages, Notes, TextEdit, rich mail) loses any
+bold/italic/links in the edited range. This prototype is **off by default**,
+gated behind `config.enableRichText`. Turn it on and, for apps listed in
+`config.contentTypeByBundleID`, instantvim round-trips formatting instead:
+it reads the field's rich content off the pasteboard, converts it to Markdown
+(via `pandoc`) for editing in nvim, then converts your edited Markdown back
+and pastes it.
+
+Two converter profiles ship, keyed per app by bundle ID:
+
+- **`rtf`** — apps that publish `public.rtf` (native Cocoa fields, and
+  RTF-on-the-pasteboard apps like Word). TextEdit and Microsoft Word are the
+  tested targets.
+- **`html`** — web/Electron `contentEditable` surfaces (`public.html`):
+  browsers (Safari, Chrome, Edge, Brave, Arc, Firefox) and rich mail compose
+  (Apple Mail) ship mapped to this. Verified against a live browser. Extend it
+  with any bundle ID whose fields are HTML editors.
+
+Every other app keeps plain-text behavior until you opt it in.
+
+The profile only sets a *preference*: on capture instantvim reads whichever
+supported format the app actually published (falling back across formats), and
+on write-back it puts every format it can produce on the pasteboard so the
+target picks the richest it understands. The plain-text fallback is always
+included.
+
+Enable it either by setting `spoon.instantvim.config.enableRichText = true`
+before `:start()`, or with the **Rich Text (RTF)** toggle in the menu bar.
+Either way of enabling runs a check for `pandoc` and notifies you if it's
+missing (rich-enabled apps then fall back to plain text). A conversion that
+fails at edit time also falls back to plain text.
+
+This path is always **Tier B (paste-on-quit)**, even for otherwise-Tier-A
+fields — the AX write attributes are plain strings, so rich content can only
+be delivered through the pasteboard. See [`richtext.lua`](richtext.lua) and
+[`wishlist.md`](wishlist.md) for the design and current limits.
 
 The nvim host runs as a **fresh, throwaway Ghostty instance per edit**
 (`open -na Ghostty --args -e nvim <path>`). An earlier design ran nvim
@@ -93,6 +134,8 @@ session state, e.g. "✎ editing (A)"). Its menu:
   field. Disabled when there's no active session. Also bindable as a hotkey
   via `cancelHotkey` (unbound by default).
 - **Host Mode** — switch `window`/`keystroke` live.
+- **Rich Text (RTF)** — toggle the rich-text prototype (see below) on/off.
+  Turning it on runs the `pandoc` check and notifies if it's missing.
 - **Reload Config** — `hs.reload()`.
 
 ## Configuration
@@ -110,6 +153,15 @@ All configuration lives in `spoon.instantvim.config` (see
   gets useful syntax/LSP for the temp buffer. Defaults to `.md`.
 - `tierOverrideByBundleID` — force a tier for apps that misreport
   `isAttributeSettable`.
+- `enableRichText` — master gate for the rich-text prototype (see above),
+  **`false` by default**. Enabling it (here or via the menu bar) runs a
+  `pandoc` check and notifies if it's missing.
+- `contentTypeByBundleID` — which apps round-trip formatting *when
+  `enableRichText` is true*, mapping a bundle ID to a converter profile
+  (`"rtf"` or `"html"`). Ships with TextEdit → `rtf` and the common browsers
+  + Apple Mail → `html`; unlisted apps stay plain-text.
+- `pandocPath` — the `pandoc` used for the rich-text round-trip, default
+  `"pandoc"` (resolved via your login shell, then cached).
 
 ## Repo layout
 
@@ -119,6 +171,7 @@ The repo root doubles as the `.spoon` directory (same convention as
 
 ```
 init.lua, capture.lua, menubar.lua   hotkey, AX capture/probe, tier engine, menu bar
+richtext.lua                          rich-text (RTF↔Markdown) round-trip, prototype
 nvim/                                 BufWritePost / VimLeave wiring
 install.sh
 ```

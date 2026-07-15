@@ -9,7 +9,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "instantvim"
-obj.version = "0.3.0"
+obj.version = "0.4.0"
 obj.author = "tboehm"
 obj.license = "MIT"
 obj.homepage = "https://github.com/TimboGP/hammerspoon-instantvim"
@@ -18,6 +18,7 @@ obj.spoonPath = hs.spoons.scriptPath()
 
 local capture = dofile(obj.spoonPath .. "capture.lua")
 local menubar = dofile(obj.spoonPath .. "menubar.lua")
+local richtext = dofile(obj.spoonPath .. "richtext.lua")
 
 obj.logger = hs.logger.new("instantvim")
 
@@ -51,6 +52,45 @@ obj.config = {
   -- Force a tier regardless of the AX probe, for apps that misreport
   -- isAttributeSettable. Values: "A", "B", or "C".
   tierOverrideByBundleID = {},
+
+  -- PROTOTYPE (wishlist.md "Formatted (rich text) content"). Master gate for
+  -- the rich-text round-trip, OFF by default. When true, apps listed in
+  -- contentTypeByBundleID round-trip their formatting through nvim as
+  -- Markdown (via pandoc) instead of being flattened to plain text; when
+  -- false, every app stays plain text regardless of that table. The feature
+  -- needs pandoc on your PATH -- enabling it (here or via the menu bar) runs
+  -- a check and notifies if pandoc is missing. Flip to true to try it.
+  enableRichText = false,
+
+  -- Apps that round-trip formatting when enableRichText is true. Maps a
+  -- bundle ID to a richtext profile name (see richtext.lua): "rtf" for
+  -- native Cocoa fields, "html" for web/Electron contentEditable surfaces
+  -- (browsers, rich mail compose). Any app NOT listed keeps the plain-text
+  -- behavior, the universal fallback. A rich round-trip is always
+  -- paste-on-quit (Tier B) even for otherwise-Tier-A fields, because the AX
+  -- write attributes are plain strings -- see wishlist.md. TextEdit is the
+  -- tested target; the html entries cover the common class and can be
+  -- extended with any bundle ID whose fields are HTML contentEditable.
+  contentTypeByBundleID = {
+    ["com.apple.TextEdit"] = "rtf",
+    ["com.microsoft.Word"] = "rtf", -- Word's HTML clipboard is cruft-heavy; prefer RTF
+    -- Pages (com.apple.Pages) deliberately NOT mapped: capture works, but its
+    -- named paragraph styles (Body/Title/Heading) have no Markdown equivalent,
+    -- so RTF write-back collapses a mixed-style selection onto the paste
+    -- point's style. See wishlist.md.
+    ["com.apple.Safari"] = "html",
+    ["com.google.Chrome"] = "html",
+    ["com.microsoft.Edge"] = "html",
+    ["com.brave.Browser"] = "html",
+    ["company.thebrowser.Browser"] = "html", -- Arc
+    ["org.mozilla.firefox"] = "html",
+    ["com.apple.mail"] = "html",
+  },
+
+  -- pandoc, used for the rich round-trip above. Resolved via your login
+  -- shell (like nvimPath), so a bare "pandoc" works even though
+  -- Hammerspoon.app itself runs with the bare system PATH.
+  pandocPath = "pandoc",
 
   -- How the nvim host is launched:
   --   "window"    - runs Ghostty's own executable directly (see
@@ -288,15 +328,33 @@ function obj:edit()
   local win = app and app:focusedWindow()
   local label = describeTarget(app, win, elem)
 
-  capture.probe(elem, function(result)
-    local tier = self.config.tierOverrideByBundleID[app and app:bundleID()] or result.tier
+  -- Rich-text round-trip (see richtext.lua / wishlist.md) for opted-in apps,
+  -- only when the feature is enabled; everything else falls through to the
+  -- plain-text path unchanged.
+  local bundleID = app and app:bundleID()
+  local profileName = self.config.enableRichText and bundleID
+    and self.config.contentTypeByBundleID[bundleID] or nil
+  local probeOpts = {
+    richProfile = profileName and richtext.profiles[profileName] or nil,
+    richProfileName = profileName,
+    richtext = richtext,
+    pandocPath = self.config.pandocPath,
+    tempDir = self.config.tempDir,
+  }
+
+  capture.probe(elem, probeOpts, function(result)
+    -- Rich is always Tier B (paste-on-quit); its markdown must never reach a
+    -- Tier A live setAttributeValue, so it wins over tierOverrideByBundleID.
+    local tier = result.rich and "B"
+      or (self.config.tierOverrideByBundleID[bundleID] or result.tier)
 
     if tier == "C" then
       self:notify("field is read-only or secure (" .. (result.reason or "unreadable") .. ")", true)
       return
     end
 
-    local ext = capture.inferExtension(app, elem, self.config)
+    -- Rich content is edited as Markdown regardless of the app's own file type.
+    local ext = result.rich and "md" or capture.inferExtension(app, elem, self.config)
     local path = string.format("%s/instantvim-%s.%s", self.config.tempDir, hs.host.uuid(), ext)
 
     local ok, err = writeFile(path, result.value)
@@ -310,6 +368,7 @@ function obj:edit()
       tier = tier,
       scope = result.scope,
       selRange = result.selRange,
+      rich = result.rich,
       app = app,
       pid = app and app:pid(),
       path = path,
@@ -317,8 +376,9 @@ function obj:edit()
     }
 
     local scopeLabel = result.scope == "selection" and ", selection" or ""
-    self:notify(string.format("Tier %s (%s%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", scopeLabel, label))
-    self:setStatus(string.format("editing (%s)", tier))
+    local richLabel = result.rich and ", rich" or ""
+    self:notify(string.format("Tier %s (%s%s%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", scopeLabel, richLabel, label))
+    self:setStatus(string.format("editing (%s%s)", tier, result.rich and " rich" or ""))
     -- Give the alert above a moment on screen before the host window
     -- appears and steals attention -- hs.alert floats above other windows,
     -- but launching immediately made it too easy to miss in practice.
@@ -376,7 +436,25 @@ function obj:onClose()
       local saved = hs.pasteboard.getContents()
       s.app:activate()
       hs.timer.doAfter(0.15, function()
-        hs.pasteboard.setContents(txt)
+        -- Rich sessions put the formatting on the pasteboard under its UTI
+        -- (writing e.g. RTF also auto-populates a plain-text representation,
+        -- so non-rich paste targets still get text); plain sessions just set
+        -- the string. Either way the paste below is a normal Cmd+V.
+        local pandocOpts = { pandocPath = self.config.pandocPath, tempDir = self.config.tempDir }
+        local reselectText = txt
+        local profile = s.rich and richtext.profiles[s.rich]
+        local built = profile and richtext.buildPasteboard(profile, txt, pandocOpts)
+        if built then
+          hs.pasteboard.writeAllData(built.data)
+          -- Markdown length counts markup the field won't render; size the
+          -- selection re-highlight off the plain-text rendering instead.
+          reselectText = built.plain
+        else
+          if s.rich then
+            self:notify("rich conversion failed - pasted as plain text", true)
+          end
+          hs.pasteboard.setContents(txt)
+        end
         -- Selection scope relies on the source field's own selection
         -- still being highlighted (untouched since capture, since the
         -- field was never refocused during the edit) -- select-all here
@@ -386,7 +464,7 @@ function obj:onClose()
         end
         hs.eventtap.keyStroke({ "cmd" }, "v")
         if s.scope == "selection" and s.selRange and capture.isElementAlive(s.elem) then
-          reselect(s.elem, s.selRange, txt)
+          reselect(s.elem, s.selRange, reselectText)
         end
         hs.timer.doAfter(0.15, function()
           hs.pasteboard.setContents(saved or "")
@@ -439,6 +517,30 @@ function obj:bindHotkeys(mapping)
   end
 end
 
+--- Verifies the rich-text feature's dependency (pandoc) when it's enabled,
+--- notifying if it's missing (rich-enabled apps then fall back to plain
+--- text). A no-op when the feature is off. Returns whether the dependency is
+--- satisfied. Shared by start() and toggleRichText() so every "enable" path
+--- runs the same check.
+function obj:checkRichTextDeps()
+  if not self.config.enableRichText then return true end
+  if richtext.available({ pandocPath = self.config.pandocPath }) then return true end
+  self:notify("pandoc not found on PATH - rich-text apps fall back to plain text. See README.", true)
+  return false
+end
+
+--- Flip the rich-text gate at runtime (from the menu bar). Enabling runs the
+--- pandoc check, same as start(), so a missing dependency is surfaced the
+--- moment the feature is turned on rather than silently at edit time.
+function obj:toggleRichText()
+  self.config.enableRichText = not self.config.enableRichText
+  if not self.config.enableRichText then
+    self:notify("rich text disabled")
+  elseif self:checkRichTextDeps() then
+    self:notify("rich text enabled")
+  end
+end
+
 --- Build the menu bar dropdown. Passed to hs.menubar as a function so it's
 --- rebuilt fresh (current status, current hostMode) each time it's opened.
 function obj:menuItems()
@@ -468,6 +570,11 @@ function obj:menuItems()
     })
   end
   table.insert(items, { title = "Host Mode", menu = hostModeItems })
+  table.insert(items, {
+    title = "Rich Text (RTF)",
+    checked = self.config.enableRichText,
+    fn = function() self:toggleRichText() end,
+  })
   table.insert(items, { title = "-" })
   table.insert(items, { title = "Reload Config", fn = function() hs.reload() end })
 
@@ -484,6 +591,9 @@ function obj:start()
   if not ensureHsCli() then
     self:notify("'hs' CLI not found on PATH - live write-back from nvim will not work. See README.", true)
   end
+  -- Rich text is gated behind enableRichText and needs pandoc; checked here
+  -- so enabling it in config surfaces a missing dependency at start.
+  self:checkRichTextDeps()
   self:bindHotkeys({ edit = self.config.hotkey, cancel = self.config.cancelHotkey })
   menubar.start()
   menubar.setMenu(function() return self:menuItems() end)
