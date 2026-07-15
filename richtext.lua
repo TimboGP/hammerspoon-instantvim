@@ -20,9 +20,14 @@ local M = {}
 -- universal fallback. Each profile names the pasteboard UTI that carries the
 -- formatting and the pandoc format tokens used to convert it to/from the
 -- Markdown edited in nvim.
+-- `uti`      pasteboard type this profile reads on capture / writes on write-back
+-- `from`/`to`  pandoc format tokens for that UTI
+-- `standalone` pass pandoc `-s` on write-back? RTF needs its document header;
+--            HTML wants a bare fragment (a full <!DOCTYPE>/<head> document
+--            pastes badly into contentEditable). See wishlist.md.
 M.profiles = {
-  rtf = { uti = "public.rtf", from = "rtf", to = "rtf" },
-  -- html = { uti = "public.html", from = "html", to = "html" },  -- future
+  rtf = { uti = "public.rtf", from = "rtf", to = "rtf", standalone = true },
+  html = { uti = "public.html", from = "html", to = "html", standalone = false },
 }
 
 -- gfm is the most human-editable Markdown flavor pandoc emits (plain links,
@@ -107,13 +112,15 @@ function M.toMarkdown(profile, data, opts)
   return nil
 end
 
---- Markdown -> rich UTI bytes (write-back direction). `-s` makes pandoc emit
---- a standalone document (with the RTF header apps need). Returns nil on
---- failure so the caller can fall back to pasting plain text.
+--- Markdown -> rich UTI bytes (write-back direction). `standalone` profiles
+--- get pandoc `-s` (e.g. RTF's document header); others get a bare fragment.
+--- Returns nil on failure so the caller can fall back to pasting plain text.
 function M.toRich(profile, markdown, opts)
   local p = tmpPath(opts, "md")
   if not writeBytes(p, markdown) then return nil end
-  local out = pandoc(opts, string.format("-f %s -t %s -s", M.flavor, profile.to), p)
+  local args = string.format("-f %s -t %s", M.flavor, profile.to)
+  if profile.standalone then args = args .. " -s" end
+  local out = pandoc(opts, args, p)
   os.remove(p)
   if out and out:match("%S") then return out end
   return nil
@@ -129,6 +136,23 @@ function M.toPlain(markdown, opts)
   os.remove(p)
   if out then return (out:gsub("%s+$", "")) end
   return nil
+end
+
+--- Build the pasteboard representation of `markdown` for `profile` and return
+--- { data = { [uti] = bytes, ... }, plain = string } ready for
+--- hs.pasteboard.writeAllData, or nil if the rich conversion failed (caller
+--- then pastes plain text). Plain text is always included as a rep: unlike
+--- RTF, writing some UTIs (e.g. public.html) does NOT auto-synthesize it, so
+--- a non-rich paste target would otherwise get nothing. `plain` is also the
+--- rendered text used to size the selection re-highlight.
+function M.buildPasteboard(profile, markdown, opts)
+  local rich = M.toRich(profile, markdown, opts)
+  if not rich then return nil end
+  local plain = M.toPlain(markdown, opts) or markdown
+  return {
+    data = { [profile.uti] = rich, ["public.utf8-plain-text"] = plain },
+    plain = plain,
+  }
 end
 
 return M

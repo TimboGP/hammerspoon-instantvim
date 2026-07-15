@@ -18,15 +18,18 @@ A first slice of the sketch below is now implemented — see
 - **Gated, off by default.** The whole path is behind `config.enableRichText`
   (default `false`); enabling it — in config or via the menu-bar toggle —
   runs a `pandoc` check and notifies if it's missing. When on,
-  `config.contentTypeByBundleID` maps a bundle ID to a converter profile
-  (only `"rtf"` so far); apps not listed keep the plain-text behavior — plain
-  text stays the universal fallback. TextEdit (`com.apple.TextEdit`) ships in
-  that map as the tested target.
-- **Capture:** copy the field to the pasteboard, read it as `public.rtf`,
-  convert RTF → Markdown (gfm) via `pandoc` for editing in nvim.
-- **Write-back:** convert edited Markdown → RTF via `pandoc`, put it on the
-  pasteboard under `public.rtf` (writing RTF auto-populates a plain-text
-  representation too, so non-rich paste targets still get text), then paste.
+  `config.contentTypeByBundleID` maps a bundle ID to a converter profile;
+  apps not listed keep the plain-text behavior — plain text stays the
+  universal fallback.
+- **Two profiles.** `rtf` (`public.rtf`) for native Cocoa fields — TextEdit
+  is the tested target — and `html` (`public.html`) for web/Electron
+  `contentEditable` — the common browsers and Apple Mail ship mapped to it.
+- **Capture:** copy the field to the pasteboard, read it under the profile's
+  UTI, convert → Markdown (gfm) via `pandoc` for editing in nvim.
+- **Write-back:** convert edited Markdown back via `pandoc` and put the rich
+  UTI *plus* a plain-text rep on the pasteboard with `writeAllData` (RTF
+  auto-synthesizes plain text; HTML does not, so the plain rep is written
+  explicitly), then paste.
 - **Always Tier B.** As predicted below, live (Tier A) rich write-back is
   impossible — `AXValue`/`AXSelectedText` are plain strings — so a rich
   round-trip goes through the paste path (on quit only) even for fields that
@@ -35,12 +38,11 @@ A first slice of the sketch below is now implemented — see
 
 ### Still deferred
 
-- **More profiles / apps.** Only `public.rtf` + TextEdit are exercised. An
-  `html` profile (`public.html`, `pandoc -f/-t html`) is the natural next
-  step for browser `contentEditable` and Mail's compose body, but each app
-  differs in which UTI it publishes/accepts and how faithfully it
-  round-trips through Markdown — this needs real per-app fidelity testing
-  before enabling more bundle IDs by default.
+- **Live per-app fidelity testing.** The RTF path is verified end-to-end
+  against TextEdit; the HTML path is verified at the conversion + pasteboard
+  level but its live `contentEditable` round-trip (browsers, Electron) is not
+  yet confirmed on real apps. Each app differs in which UTI it
+  publishes/accepts and how faithfully it round-trips through Markdown.
 - **Fidelity edge cases.** Some formatting (nested styles, tables, comments,
   tracked changes) won't round-trip cleanly through Markdown regardless of
   converter. The prototype accepts this; a general solution would need a

@@ -50,10 +50,19 @@ formatted content (Word, Pages, Notes, TextEdit, rich mail) loses any
 bold/italic/links in the edited range. This prototype is **off by default**,
 gated behind `config.enableRichText`. Turn it on and, for apps listed in
 `config.contentTypeByBundleID`, instantvim round-trips formatting instead:
-it reads the field as RTF off the pasteboard, converts it to Markdown (via
-`pandoc`) for editing in nvim, then converts your edited Markdown back to RTF
-and pastes it. TextEdit is the tested target and ships in that list; every
-other app keeps plain-text behavior until you opt it in.
+it reads the field's rich content off the pasteboard, converts it to Markdown
+(via `pandoc`) for editing in nvim, then converts your edited Markdown back
+and pastes it.
+
+Two converter profiles ship, keyed per app by bundle ID:
+
+- **`rtf`** — native Cocoa fields (`public.rtf`). TextEdit is the tested target.
+- **`html`** — web/Electron `contentEditable` surfaces (`public.html`):
+  browsers (Safari, Chrome, Edge, Brave, Arc, Firefox) and rich mail compose
+  (Apple Mail) ship mapped to this. Extend it with any bundle ID whose fields
+  are HTML editors.
+
+Every other app keeps plain-text behavior until you opt it in.
 
 Enable it either by setting `spoon.instantvim.config.enableRichText = true`
 before `:start()`, or with the **Rich Text (RTF)** toggle in the menu bar.
@@ -141,8 +150,8 @@ All configuration lives in `spoon.instantvim.config` (see
   `pandoc` check and notifies if it's missing.
 - `contentTypeByBundleID` — which apps round-trip formatting *when
   `enableRichText` is true*, mapping a bundle ID to a converter profile
-  (`"rtf"`). Ships with `{ ["com.apple.TextEdit"] = "rtf" }`; unlisted apps
-  stay plain-text.
+  (`"rtf"` or `"html"`). Ships with TextEdit → `rtf` and the common browsers
+  + Apple Mail → `html`; unlisted apps stay plain-text.
 - `pandocPath` — the `pandoc` used for the rich-text round-trip, default
   `"pandoc"` (resolved via your login shell, then cached).
 

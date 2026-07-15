@@ -63,13 +63,23 @@ obj.config = {
   enableRichText = false,
 
   -- Apps that round-trip formatting when enableRichText is true. Maps a
-  -- bundle ID to a richtext profile name (see richtext.lua -- "rtf" is the
-  -- only one so far). Any app NOT listed keeps the plain-text behavior, the
-  -- universal fallback. A rich round-trip is always paste-on-quit (Tier B)
-  -- even for otherwise-Tier-A fields, because the AX write attributes are
-  -- plain strings -- see wishlist.md. TextEdit is the tested target.
+  -- bundle ID to a richtext profile name (see richtext.lua): "rtf" for
+  -- native Cocoa fields, "html" for web/Electron contentEditable surfaces
+  -- (browsers, rich mail compose). Any app NOT listed keeps the plain-text
+  -- behavior, the universal fallback. A rich round-trip is always
+  -- paste-on-quit (Tier B) even for otherwise-Tier-A fields, because the AX
+  -- write attributes are plain strings -- see wishlist.md. TextEdit is the
+  -- tested target; the html entries cover the common class and can be
+  -- extended with any bundle ID whose fields are HTML contentEditable.
   contentTypeByBundleID = {
     ["com.apple.TextEdit"] = "rtf",
+    ["com.apple.Safari"] = "html",
+    ["com.google.Chrome"] = "html",
+    ["com.microsoft.Edge"] = "html",
+    ["com.brave.Browser"] = "html",
+    ["company.thebrowser.Browser"] = "html", -- Arc
+    ["org.mozilla.firefox"] = "html",
+    ["com.apple.mail"] = "html",
   },
 
   -- pandoc, used for the rich round-trip above. Resolved via your login
@@ -428,12 +438,12 @@ function obj:onClose()
         local pandocOpts = { pandocPath = self.config.pandocPath, tempDir = self.config.tempDir }
         local reselectText = txt
         local profile = s.rich and richtext.profiles[s.rich]
-        local richData = profile and richtext.toRich(profile, txt, pandocOpts)
-        if richData then
-          hs.pasteboard.writeDataForUTI(profile.uti, richData)
+        local built = profile and richtext.buildPasteboard(profile, txt, pandocOpts)
+        if built then
+          hs.pasteboard.writeAllData(built.data)
           -- Markdown length counts markup the field won't render; size the
           -- selection re-highlight off the plain-text rendering instead.
-          reselectText = richtext.toPlain(txt, pandocOpts) or txt
+          reselectText = built.plain
         else
           if s.rich then
             self:notify("rich conversion failed - pasted as plain text", true)
