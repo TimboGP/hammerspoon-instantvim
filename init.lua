@@ -505,21 +505,47 @@ function obj:cancel()
   self:notify("edit session cancelled")
 end
 
+local ACTION_DESCRIPTIONS = {
+  edit = "Edit focused field with Neovim [instantvim]",
+  cancel = "Cancel in-progress edit session [instantvim]",
+}
+
+local MOD_SYMBOLS = { cmd = "⌘", ctrl = "⌃", alt = "⌥", shift = "⇧" }
+
+local function keyLabel(spec)
+  local mods, key = spec[1], spec[2]
+  local out = {}
+  for _, m in ipairs(mods) do
+    table.insert(out, MOD_SYMBOLS[m] or m)
+  end
+  table.insert(out, key:upper())
+  return table.concat(out)
+end
+
 function obj:bindHotkeys(mapping)
   local def = {
     edit = function() self:edit() end,
     cancel = function() self:cancel() end,
   }
-  local descriptions = {
-    edit = "Edit focused field with Neovim [instantvim]",
-    cancel = "Cancel in-progress edit session [instantvim]",
-  }
+  self.hotkeyMapping = mapping
   self.hotkeyObjs = self.hotkeyObjs or {}
   for name, spec in pairs(mapping) do
     if def[name] and spec then
-      self.hotkeyObjs[name] = hs.hotkey.bind(spec[1], spec[2], descriptions[name], def[name])
+      self.hotkeyObjs[name] = hs.hotkey.bind(spec[1], spec[2], ACTION_DESCRIPTIONS[name], def[name])
     end
   end
+end
+
+--- Structured {key, description} rows for instantvim's hotkeys, for external
+--- cheat-sheet tools (e.g. CheatSheet.spoon) to query.
+function obj:bindings()
+  local rows = {}
+  for name, spec in pairs(self.hotkeyMapping or {}) do
+    if spec then
+      table.insert(rows, { key = keyLabel(spec), description = ACTION_DESCRIPTIONS[name] or name })
+    end
+  end
+  return rows
 end
 
 -- hs.settings key under which the rich-text toggle is persisted, so a choice
