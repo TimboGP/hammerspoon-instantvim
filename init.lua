@@ -19,6 +19,7 @@ obj.spoonPath = hs.spoons.scriptPath()
 local capture = dofile(obj.spoonPath .. "capture.lua")
 local menubar = dofile(obj.spoonPath .. "menubar.lua")
 local richtext = dofile(obj.spoonPath .. "richtext.lua")
+local KeybindRegistry = require("keybind_registry")
 -- Slack needs a bespoke adapter (proprietary clipboard); it registers its own
 -- profile rather than using a generic UTI+pandoc one. See slack.lua.
 local slack = dofile(obj.spoonPath .. "slack.lua")
@@ -528,10 +529,16 @@ function obj:bindHotkeys(mapping)
     cancel = function() self:cancel() end,
   }
   self.hotkeyMapping = mapping
-  self.hotkeyObjs = self.hotkeyObjs or {}
   for name, spec in pairs(mapping) do
     if def[name] and spec then
-      self.hotkeyObjs[name] = hs.hotkey.bind(spec[1], spec[2], ACTION_DESCRIPTIONS[name], def[name])
+      KeybindRegistry.bind({
+        scope = "global",
+        mods = spec[1],
+        key = spec[2],
+        desc = ACTION_DESCRIPTIONS[name] or name,
+        fn = def[name],
+        spoonName = self.name,
+      })
     end
   end
 end
@@ -653,10 +660,7 @@ function obj:start()
 end
 
 function obj:stop()
-  for name, hotkeyObj in pairs(self.hotkeyObjs or {}) do
-    hotkeyObj:delete()
-    self.hotkeyObjs[name] = nil
-  end
+  KeybindRegistry.unbindBySpoon(self.name)
   menubar.stop()
   return self
 end
