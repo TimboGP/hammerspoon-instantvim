@@ -395,6 +395,14 @@ function obj:edit()
   end)
 end
 
+--- Mirrors nvim's current mode in the menu bar cursor glyph. Called from
+--- nvim's ModeChanged autocmd via `hs -c 'spoon.instantvim:setVimMode("i")'`.
+--- Ignored with no active session (e.g. a stray call racing session end).
+function obj:setVimMode(mode)
+  if not self.session then return end
+  menubar.setCursorMode(mode)
+end
+
 --- Tier A live write-back. Called from nvim's BufWritePost via
 --- `hs -c "spoon.instantvim:writeBack()"`. Safe to call repeatedly; no
 --- focus change, so it never disturbs the user mid-edit.

@@ -29,8 +29,10 @@ local buf = vim.api.nvim_get_current_buf()
 -- to run, since nvim exits right after BufWritePost fires with no gap for
 -- an undetached job to finish in. Same reasoning already applied to the
 -- VimLeave/onClose call below; it now applies here too.
-local function callHammerspoon(fn, opts)
-  local cmd = string.format("hs -c 'spoon.instantvim:%s()'", fn)
+local function callHammerspoon(fn, arg, opts)
+  local call = arg and string.format("spoon.instantvim:%s(%q)", fn, arg)
+    or string.format("spoon.instantvim:%s()", fn)
+  local cmd = string.format("hs -c '%s'", call)
   local jobOpts = opts or {}
   jobOpts.detach = true
   vim.fn.jobstart({ vim.o.shell, "-lc", cmd }, jobOpts)
@@ -39,6 +41,31 @@ end
 vim.api.nvim_create_autocmd("BufWritePost", {
   buffer = buf,
   callback = function() callHammerspoon("writeBack") end,
+})
+
+-- Mirrors nvim's mode in the menu bar cursor glyph. Collapses vim.fn.mode()'s
+-- many sub-states (niI, no, Rvc, ...) down to the four the menu bar actually
+-- draws differently, and only calls out when that coarse mode changes --
+-- ModeChanged fires on every transition, including momentary ones like
+-- entering operator-pending, and each call spawns a login-shell job (see the
+-- comment above callHammerspoon), so reporting every raw transition would
+-- spawn far more processes than the cursor display can even show.
+local function coarseMode(m)
+  local c = m:sub(1, 1)
+  if c == "i" or c == "R" then return c end
+  if c == "v" or c == "V" or c == "s" or c == "S" or c == "\22" or c == "\19" then return "v" end
+  return "n"
+end
+
+local lastReportedMode = "n"
+vim.api.nvim_create_autocmd("ModeChanged", {
+  pattern = "*:*", -- match every transition; see :h ModeChanged
+  callback = function()
+    local mode = coarseMode(vim.fn.mode())
+    if mode == lastReportedMode then return end
+    lastReportedMode = mode
+    callHammerspoon("setVimMode", mode)
+  end,
 })
 
 -- Global, not buffer-scoped: VimLeave fires once for the whole nvim

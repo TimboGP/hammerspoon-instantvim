@@ -11,13 +11,21 @@ local item = nil
 local blinkTimer = nil
 local blinkVisible = true
 local label = nil -- nil while idle; a short tag like "A" or "AR" while editing
+local vimMode = "n" -- coarse mode reported by nvim's ModeChanged: "n", "i", "v", or "R"
+
+-- Mirrors the terminal cursor shape for each vim mode: a thin bar for
+-- insert, an underline for replace, and a block for everything else --
+-- visual gets the same block as normal, which matches real vim/terminal
+-- cursor behavior (mode is conveyed elsewhere, not by shape, there).
+local CURSOR_GLYPHS = { i = "│", R = "_" }
+local DEFAULT_CURSOR_GLYPH = "█"
 
 -- labelColor is the system dynamic color menu bar text normally renders in
 -- (adapts to light/dark mode on its own). The blink toggles its alpha
--- rather than swapping the "_" for spaces -- no substitute character has
--- the exact same advance width as "_", which made the icon visibly creep
--- left/right on every tick. Same glyph, same run, only alpha changes: the
--- layout literally cannot shift.
+-- rather than swapping the cursor glyph for spaces -- no substitute
+-- character has the exact same advance width, which made the icon visibly
+-- creep left/right on every tick. Same glyph, same run, only alpha
+-- changes: the layout literally cannot shift.
 local LABEL_COLOR = { list = "System", name = "labelColor" }
 
 local function render()
@@ -28,7 +36,8 @@ local function render()
   end
   local text = hs.styledtext.new(" (" .. label .. ")", { color = LABEL_COLOR })
   local cursorColor = blinkVisible and LABEL_COLOR or { list = "System", name = "labelColor", alpha = 0 }
-  local cursor = hs.styledtext.new("_", { color = cursorColor })
+  local glyph = CURSOR_GLYPHS[vimMode] or DEFAULT_CURSOR_GLYPH
+  local cursor = hs.styledtext.new(glyph, { color = cursorColor })
   item:setTitle(text .. cursor)
 end
 
@@ -65,6 +74,7 @@ end
 function M.setStatus(tag)
   label = tag or nil
   if label and not blinkTimer then
+    vimMode = "n" -- nvim always opens in Normal mode
     blinkVisible = true
     blinkTimer = hs.timer.new(0.8, function()
       blinkVisible = not blinkVisible
@@ -76,6 +86,13 @@ function M.setStatus(tag)
     blinkTimer = nil
     blinkVisible = true
   end
+  render()
+end
+
+--- M.setCursorMode(mode) -- mode is the coarse tag nvim's ModeChanged
+--- autocmd reports ("n", "i", "v", "R"). No-op while idle.
+function M.setCursorMode(mode)
+  vimMode = mode
   render()
 end
 
