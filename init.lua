@@ -195,9 +195,12 @@ local function resolveNvimPath(nvimPath)
   return nvimPath
 end
 
-function obj:setStatus(text)
+--- tag is the compact form shown in the menu bar itself (e.g. "A", "AR"
+--- for tier A rich); text is the full sentence shown in the dropdown menu.
+--- tag is nil for the idle state, which shows the icon with no text.
+function obj:setStatus(text, tag)
   self.status = text
-  menubar.setStatus(text)
+  menubar.setStatus(tag)
 end
 
 function obj:notify(msg, persistent)
@@ -384,7 +387,7 @@ function obj:edit()
     local scopeLabel = result.scope == "selection" and ", selection" or ""
     local richLabel = result.rich and ", rich" or ""
     self:notify(string.format("Tier %s (%s%s%s) - editing %s", tier, tier == "A" and "live sync" or "sync on quit", scopeLabel, richLabel, label))
-    self:setStatus(string.format("editing (%s%s)", tier, result.rich and " rich" or ""))
+    self:setStatus(string.format("editing (%s%s)", tier, result.rich and " rich" or ""), tier .. (result.rich and "R" or ""))
     -- Give the alert above a moment on screen before the host window
     -- appears and steals attention -- hs.alert floats above other windows,
     -- but launching immediately made it too easy to miss in practice.
@@ -653,7 +656,7 @@ function obj:start()
   self:loadPersistedState()
   self:checkRichTextDeps()
   self:bindHotkeys({ edit = self.config.hotkey, cancel = self.config.cancelHotkey })
-  menubar.start()
+  menubar.start(self.spoonPath .. "menubar-icon.png")
   menubar.setMenu(function() return self:menuItems() end)
   self.logger.i("instantvim started")
   return self
