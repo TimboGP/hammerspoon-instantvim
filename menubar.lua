@@ -44,13 +44,13 @@ end
 --- M.start(iconPath) -- iconPath is the menu bar glyph, rendered as a
 --- template image so macOS recolors it for light/dark mode and the
 --- menu-open highlight automatically. The source PNG is stored at 3x pixel
---- density; sizing it down to 19x18pt here (rather than shipping a smaller
+--- density; sizing it down to 17x18pt here (rather than shipping a smaller
 --- file) keeps it crisp on Retina displays.
 function M.start(iconPath)
   item = hs.menubar.new()
   local icon = hs.image.imageFromPath(iconPath)
   if icon then
-    icon:size({ w = 19, h = 18 }, true)
+    icon:size({ w = 17, h = 18 }, true)
     item:setIcon(icon)
   end
   M.setStatus(nil)
