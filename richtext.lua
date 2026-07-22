@@ -41,11 +41,20 @@ M.profiles = {
   html = { reps = { REP_HTML, REP_RTF } },
 }
 
--- gfm is the most human-editable Markdown flavor pandoc emits (plain links,
--- `<u>` for underline rather than pandoc's `[...]{.underline}` span noise),
--- and --wrap=none keeps paragraphs on one line so soft-wrapped prose doesn't
+-- Built on markdown_strict (rather than gfm) plus gfm's own extensions
+-- spelled out individually, MINUS escaped_line_breaks. gfm hardcodes that
+-- extension on with no way to turn it off, which makes its writer render
+-- every hard line break (<br>) as a trailing backslash -- glaringly visible
+-- clutter for content that has one on every line (e.g. Apple Mail's
+-- div-per-line compose body, see pandoc-html-filter.lua). markdown_strict
+-- leaves escaped_line_breaks off by default, so the writer falls back to
+-- CommonMark's other valid hard-break syntax -- two trailing spaces --
+-- which is invisible in the buffer and round-trips identically.
+-- --wrap=none keeps paragraphs on one line so soft-wrapped prose doesn't
 -- pick up hard line breaks on the round-trip.
-M.flavor = "gfm"
+M.flavor = "markdown_strict+alerts+autolink_bare_uris+emoji+footnotes"
+  .. "+gfm_auto_identifiers+pipe_tables+strikeout+task_lists"
+  .. "+tex_math_dollars+yaml_metadata_block+raw_html"
 
 local function shQuote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
@@ -125,6 +134,16 @@ function M.captureRep(profile, availableTypes)
   return nil
 end
 
+--- Absolute path to pandoc-html-filter.lua (see that file), or nil if
+--- opts.spoonPath wasn't supplied. Only meaningful for the "html" rep --
+--- the div-per-line quirk it fixes is specific to WebKit contentEditable
+--- HTML, not RTF.
+local function htmlFilterPath(opts)
+  local dir = opts and opts.spoonPath
+  if not dir then return nil end
+  return dir .. "pandoc-html-filter.lua"
+end
+
 --- Rich UTI bytes -> Markdown (capture direction). A rep may supply a custom
 --- `captureFn(data, opts)` (e.g. an app-specific clipboard format); otherwise
 --- pandoc converts from `rep.from`. Returns nil on any failure (empty doc,
@@ -137,7 +156,12 @@ function M.toMarkdown(rep, data, opts)
   end
   local p = tmpPath(opts, "rich")
   if not writeBytes(p, data) then return nil end
-  local md = pandoc(opts, string.format("-f %s -t %s --wrap=none", rep.from, M.flavor), p)
+  local filterArg = ""
+  if rep.from == "html" then
+    local filter = htmlFilterPath(opts)
+    if filter then filterArg = " --lua-filter=" .. shQuote(filter) end
+  end
+  local md = pandoc(opts, string.format("-f %s -t %s --wrap=none%s", rep.from, M.flavor, filterArg), p)
   os.remove(p)
   if md and md:match("%S") then return md end
   return nil

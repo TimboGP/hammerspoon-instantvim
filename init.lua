@@ -349,6 +349,7 @@ function obj:edit()
     richtext = richtext,
     pandocPath = self.config.pandocPath,
     tempDir = self.config.tempDir,
+    spoonPath = self.spoonPath,
   }
 
   capture.probe(elem, probeOpts, function(result)
